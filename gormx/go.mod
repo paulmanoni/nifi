@@ -3,7 +3,7 @@ module github.com/paulmanoni/nifi/gormx
 go 1.26.2
 
 require (
-	github.com/paulmanoni/nifi v0.0.0
+	github.com/paulmanoni/nifi v0.1.0
 	gorm.io/gorm v1.31.0
 )
 
@@ -41,7 +41,7 @@ require (
 	modernc.org/token v1.1.0 // indirect
 )
 
-// Local development against the parent in this repo. At release this is
-// swapped for a plain `require github.com/paulmanoni/nifi vX.Y.Z` pinned to a
-// parent tag that no longer contains gormx.
+// Build against the parent as it is in this repo, rather than the released
+// version above. It applies while developing here and is ignored by anything
+// that depends on this module, which resolves the require instead.
 replace github.com/paulmanoni/nifi => ../
