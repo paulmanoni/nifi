@@ -1,0 +1,105 @@
+/* Svelte Flow theming with the app's tokens. */
+.svelte-flow {
+  --xy-background-color: var(--canvas-bg);
+  --xy-background-pattern-dots-color-default: var(--canvas-dot);
+  --xy-edge-stroke-default: var(--edge);
+  --xy-edge-stroke-selected-default: var(--accent);
+  --xy-connectionline-stroke-default: var(--accent);
+  --xy-attribution-background-color-default: transparent;
+  --xy-minimap-background-color-default: var(--bg-elev);
+  --xy-minimap-mask-background-color-default: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
+  --xy-minimap-node-background-color-default: var(--border-strong);
+  --xy-controls-button-background-color-default: var(--bg-elev);
+  --xy-controls-button-background-color-hover-default: var(--bg-hover);
+  --xy-controls-button-color-default: var(--text-2);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-selection-background-color-default: color-mix(in srgb, var(--accent) 8%, transparent);
+  --xy-selection-border-default: 1px dashed var(--accent);
+  font-family: var(--font);
+}
+
+.svelte-flow .svelte-flow__node-processor {
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius);
+}
+
+.svelte-flow .svelte-flow__handle {
+  width: 10px;
+  height: 10px;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 50%;
+  border: 2px solid var(--node-bg);
+  background: var(--edge);
+  box-shadow: 0 0 0 1px var(--node-border);
+  transition: background 0.12s, box-shadow 0.12s;
+}
+.svelte-flow .svelte-flow__handle.h-in {
+  left: -6px;
+}
+.svelte-flow .svelte-flow__handle.h-out {
+  right: -6px;
+}
+.svelte-flow .svelte-flow__handle.h-fail {
+  background: color-mix(in srgb, var(--err) 70%, var(--edge));
+}
+.svelte-flow .svelte-flow__handle:hover,
+.svelte-flow .svelte-flow__handle.connectingfrom,
+.svelte-flow .svelte-flow__handle.connectingto,
+.svelte-flow .svelte-flow__handle.valid {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.svelte-flow .svelte-flow__edge-path.fe {
+  stroke: var(--edge);
+  stroke-width: 1.5;
+}
+.svelte-flow .svelte-flow__edge:hover .svelte-flow__edge-path.fe {
+  stroke: color-mix(in srgb, var(--edge) 60%, var(--text));
+}
+.svelte-flow .svelte-flow__edge-path.fe.fail {
+  stroke-dasharray: 5 4;
+}
+.svelte-flow .svelte-flow__edge-path.fe.flowing {
+  stroke-dasharray: 6 5;
+  animation: flow-dash 0.7s linear infinite;
+}
+.svelte-flow .svelte-flow__edge-path.fe.issue {
+  stroke: var(--warn);
+}
+.svelte-flow .svelte-flow__edge.selected .svelte-flow__edge-path.fe,
+.svelte-flow .svelte-flow__edge-path.fe.sel {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -11;
+  }
+}
+
+.svelte-flow .svelte-flow__edge-label {
+  background: transparent;
+  padding: 0;
+}
+
+.svelte-flow .svelte-flow__controls {
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.svelte-flow .svelte-flow__controls-button {
+  border-bottom: 1px solid var(--border);
+}
+.svelte-flow .svelte-flow__controls-button svg {
+  fill: currentColor;
+}
+.svelte-flow .svelte-flow__minimap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}

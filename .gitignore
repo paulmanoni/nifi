@@ -1,0 +1,11 @@
+nifi.db*
+*.db-shm
+*.db-wal
+/nifi
+connections.json
+examples/**/*.db*
+
+# The UI is built into ui/dist, which go:embed puts in the binary — so dist is
+# committed and what builds it is not.
+ui/node_modules/
+ui/.vite/
