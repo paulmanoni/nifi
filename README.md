@@ -1,5 +1,14 @@
 # nifi
 
+> **Not Apache NiFi, and not from the Apache Software Foundation.** This is an
+> independent Go library. Its interface is deliberately modelled on Apache
+> NiFi's, because that is the shape an operator already knows — but it shares
+> none of its code, runs none of its processors, and reads none of its flow
+> definitions. Apache®, Apache NiFi, NiFi and the feather logo are trademarks
+> of the [Apache Software Foundation](https://apache.org); this project is not
+> endorsed by or affiliated with it. If you are looking for Apache NiFi, it is
+> at [nifi.apache.org](https://nifi.apache.org).
+
 **Embeddable, UI-first database migration flows for Go apps.** A NiFi-style
 canvas (Svelte + Svelte Flow) and a streaming engine you mount inside an
 existing service to move large databases. It handles **MySQL → PostgreSQL**
