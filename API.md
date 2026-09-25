@@ -80,19 +80,27 @@ logical type (`GET /api/types`); `expr` = expression field.
 
 `GET /api/types` → `[{"value":"text","label":"text"}, …]`
 
-## Connections (declared in code, read-only)
+## Connections
 
-Connections are configured by the host application when it mounts the
-library. The UI can list, test and browse them — it never creates, edits or
-deletes them, and never sees credentials.
+Either declared by the host application when it mounts the library, or added
+through this API and kept in the state file. Both are listed together;
+`managed` says which may be changed here. **No response ever carries a
+password.**
 
 ```ts
 type Connection = { id: string; name: string; driver: "mysql" | "postgres";
                     host: string; port: number; user: string; database: string;
-                    description?: string }
+                    description?: string;
+                    managed: boolean /* false = declared in code, read-only here */ }
 ```
 
 * `GET /api/connections` → `Connection[]`
+* `PUT /api/connections/:id` `{name?, driver, host, port?, user?, password?, database, description?, params?}`
+  → `Connection` — creates or replaces a stored connection (`edit`). An empty
+  `password` on an existing one keeps the stored one. **409** when `:id` is
+  declared in code: the application owns it.
+* `DELETE /api/connections/:id` → `{"ok":true}` (`edit`). **409** for one
+  declared in code. Flows still referring to it fail at their next run.
 * `POST /api/connections/test` `{id}` → `{"ok":true,"serverVersion":"8.0.36","latencyMs":4}` or `{"ok":false,"error":"…"}`
 * `GET /api/connections/:id/tables` → `TableSummary[]`
   `{schema, name, estimatedRows, sizeBytes, hasPrimaryKey}`

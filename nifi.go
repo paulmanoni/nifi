@@ -41,7 +41,7 @@ import (
 )
 
 // Version of the engine.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 //go:embed all:ui/dist
 var uiFS embed.FS
@@ -186,11 +186,19 @@ func New(cfg Config) (*Engine, error) {
 		st.Close()
 		return nil, err
 	}
+	// What the host declared in code wins: its wiring is the application's,
+	// and a stored connection must never quietly take over an id the app
+	// believes it owns. Anything else is looked up in the store, which is
+	// where connections added through the UI live.
 	resolve := func(ctx context.Context, id string) (dbx.Connection, error) {
 		for _, c := range fixed {
 			if c.ID == id {
 				return c, nil
 			}
+		}
+		c, err := st.GetConnection(ctx, id)
+		if err == nil {
+			return c, nil
 		}
 		return dbx.Connection{}, fmt.Errorf("%w: connection %q is not configured", store.ErrNotFound, id)
 	}

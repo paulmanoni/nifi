@@ -2,6 +2,7 @@ import type { ExprFunction, FlowVersion, Parameter, QueueInfo,
   Bulletin,
   Column,
   Connection,
+  ConnectionInput,
   ConnectionTestResult,
   DeadLetterPage,
   ExprTestResponse,
@@ -118,6 +119,8 @@ export const api = {
 
   connections: () => get<Connection[]>('/connections'),
   testConnection: (id: string) => post<ConnectionTestResult>('/connections/test', { id }),
+  saveConnection: (id: string, c: ConnectionInput) => put<Connection>(`/connections/${enc(id)}`, c),
+  deleteConnection: (id: string) => del(`/connections/${enc(id)}`),
   tables: (id: string, signal?: AbortSignal) => get<TableSummary[]>(`/connections/${enc(id)}/tables`, signal),
   tableMeta: (id: string, table: string) => get<TableMeta>(`/connections/${enc(id)}/tables/${enc(table)}`),
 

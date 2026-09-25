@@ -4,7 +4,7 @@
   import { outputPorts, defaultConcurrency, type PNode } from './model';
   import { iconFor, categoryColor } from '../icons';
   import { fmtCompact, fmtNum } from '../format';
-  import { TriangleAlert } from 'lucide-svelte';
+  import { TriangleAlert, Play, Square, Pause } from 'lucide-svelte';
 
   // Processor card: tinted icon · name/type · status dot, a 2×2 stats grid,
   // and a footer with one pill per output relationship (handle on the right edge).
@@ -54,17 +54,21 @@
 </script>
 
 <div class="pn" class:selected class:disabled={node.disabled} style:--cat={color} role="presentation" ondblclick={() => ctx.opennode(id)}>
+  {#if bulletinLines.length}
+    <span class="bul" class:err={bulletinErr} title={bulletinLines.join('\n')}><TriangleAlert size={11} strokeWidth={2.4} /></span>
+  {/if}
+
   <div class="head">
-    <span class="ic"><Icon size={16} strokeWidth={1.8} /></span>
+    <span class="st {status}" title={statusTitle[status]}>
+      {#if status === 'running'}<Play size={11} fill="currentColor" strokeWidth={0} />
+      {:else if status === 'invalid'}<TriangleAlert size={11} strokeWidth={2.4} />
+      {:else if status === 'disabled'}<Pause size={11} fill="currentColor" strokeWidth={0} />
+      {:else}<Square size={10} fill="currentColor" strokeWidth={0} />{/if}
+    </span>
+    <span class="ic"><Icon size={13} strokeWidth={1.9} /></span>
     <div class="titles">
+      <div class="type" title={spec?.label ?? node.type}>{spec?.label ?? `Unknown · ${node.type}`}</div>
       <div class="name" title={node.name}>{node.name}</div>
-      <div class="type">{spec?.label ?? `Unknown · ${node.type}`}</div>
-    </div>
-    <div class="flags">
-      {#if bulletinLines.length}
-        <span class="bul" class:err={bulletinErr} title={bulletinLines.join('\n')}><TriangleAlert size={13} strokeWidth={2.2} /></span>
-      {/if}
-      <span class="dot {status}" title={statusTitle[status]}></span>
     </div>
   </div>
 
@@ -73,8 +77,8 @@
     <div class="s"><span class="k">Out</span><span class="v">{vOut}</span></div>
     <div class="s"><span class="k">Rate</span><span class="v">{vRate}</span></div>
     <div class="s">
-      <span class="k">Tasks</span>
-      <span class="v">{vTasks}{#if errs > 0}<span class="e"> · {fmtCompact(errs)} err</span>{/if}</span>
+      <span class="k">Tasks / Errors</span>
+      <span class="v">{vTasks}{#if errs > 0}<span class="e"> · {fmtCompact(errs)}</span>{/if}</span>
     </div>
   </div>
 
@@ -97,54 +101,86 @@
 <style>
   .pn {
     position: relative;
-    width: 272px;
+    width: 296px;
     background: var(--node-bg);
     border: 1px solid var(--node-border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     box-shadow: var(--node-shadow);
     color: var(--text);
-    font-size: 12px;
-    transition: box-shadow 0.15s, border-color 0.15s;
+    font-size: 11.5px;
+    transition: box-shadow 0.12s, border-color 0.12s;
   }
   .pn:hover {
     box-shadow: var(--node-shadow-hover);
   }
   .pn.selected {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent), var(--node-shadow-hover);
+    box-shadow: 0 0 0 1px var(--accent), var(--node-shadow-hover);
   }
   .pn.disabled {
-    opacity: 0.55;
+    opacity: 0.6;
   }
+
+  /* Bulletins sit in the corner of the component itself, as they do on a
+     NiFi canvas — visible without opening anything. */
+  .bul {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    display: inline-flex;
+    padding: 2px 3px;
+    background: var(--warn);
+    color: #fff;
+    border-radius: 0 var(--radius) 0 var(--radius);
+    cursor: help;
+    z-index: 1;
+  }
+  .bul.err {
+    background: var(--err);
+  }
+
   .head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 10px 8px 10px;
+    gap: 7px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  /* Run state is a glyph, not a dot: shape carries it as well as colour. */
+  .st {
+    flex: none;
+    display: inline-flex;
+    width: 13px;
+    justify-content: center;
+    color: var(--stopped);
+  }
+  .st.running {
+    color: var(--running);
+  }
+  .st.invalid {
+    color: var(--invalid);
+  }
+  .st.disabled {
+    color: var(--disabled);
   }
   .ic {
-    width: 28px;
-    height: 28px;
     flex: none;
-    display: grid;
-    place-items: center;
-    border-radius: 7px;
+    display: inline-flex;
     color: var(--cat);
-    background: color-mix(in srgb, var(--cat) 13%, transparent);
   }
   .titles {
     flex: 1;
     min-width: 0;
   }
-  .name {
-    font-size: 13px;
+  .type {
+    font-size: 12px;
     font-weight: 600;
-    line-height: 17px;
+    line-height: 15px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .type {
+  .name {
     font-size: 11px;
     line-height: 14px;
     color: var(--text-3);
@@ -152,76 +188,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .flags {
-    align-self: flex-start;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding-top: 2px;
-  }
-  .bul {
-    display: inline-flex;
-    color: var(--warn);
-    cursor: help;
-  }
-  .bul.err {
-    color: var(--err);
-  }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--text-3);
-    opacity: 0.55;
-  }
-  .dot.running {
-    background: var(--ok);
-    opacity: 1;
-    animation: pulse 1.6s ease-out infinite;
-  }
-  .dot.invalid {
-    background: var(--warn);
-    opacity: 1;
-  }
-  .dot.disabled {
-    background: transparent;
-    border: 1.5px solid var(--text-3);
-  }
-  @keyframes pulse {
-    0% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent);
-    }
-    100% {
-      box-shadow: 0 0 0 6px transparent;
-    }
-  }
+
+  /* Label on the left, figure on the right — a readout, not a card. */
   .stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px 12px;
-    margin: 0 10px 10px;
-    padding: 7px 9px;
-    border-radius: 5px;
-    background: var(--node-well);
+    padding: 4px 8px 5px;
   }
   .s {
     display: flex;
-    flex-direction: column;
-    min-width: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    line-height: 16px;
   }
   .k {
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-3);
-    line-height: 12px;
+    font-size: 11px;
+    color: var(--text-2);
+    white-space: nowrap;
   }
   .v {
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11px;
     font-variant-numeric: tabular-nums;
-    line-height: 16px;
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
@@ -233,31 +220,32 @@
   .e {
     color: var(--err);
   }
+
   .ports {
     border-top: 1px solid var(--border);
-    padding: 5px 0 5px;
+    background: var(--node-well);
+    padding: 3px 0;
   }
   .port {
     position: relative;
-    height: 20px;
+    height: 18px;
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    padding-right: 12px;
+    padding-right: 10px;
   }
   .pill {
-    font-size: 10.5px;
-    line-height: 16px;
-    padding: 0 7px;
-    border-radius: 999px;
-    background: var(--node-well);
-    border: 1px solid var(--border);
+    font-size: 10px;
+    line-height: 14px;
+    padding: 0 5px;
+    border-radius: var(--radius);
+    background: var(--bg-elev);
+    border: 1px solid var(--border-strong);
     color: var(--text-2);
     font-weight: 500;
   }
   .pill.fail {
-    background: color-mix(in srgb, var(--err) 9%, transparent);
-    border-color: color-mix(in srgb, var(--err) 28%, transparent);
+    border-color: var(--err);
     color: var(--err);
   }
 </style>

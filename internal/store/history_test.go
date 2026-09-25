@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/paulmanoni/nifi/internal/dbx"
 	"github.com/paulmanoni/nifi/internal/model"
 	"github.com/paulmanoni/nifi/internal/store"
 )
@@ -59,5 +60,54 @@ func TestFlowHistoryAndFolders(t *testing.T) {
 	}
 	if vs, _ = st.ListVersions(ctx, f.ID); len(vs) != 0 {
 		t.Fatalf("history survived the delete: %+v", vs)
+	}
+}
+
+// A connection's password is write-only from the API's side, so the rule that
+// an edit omitting it keeps the stored one has to be held here.
+func TestConnectionPasswordSurvivesAnEditThatOmitsIt(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	c := dbx.Connection{ID: "wh", Name: "Warehouse", Driver: "postgres", Host: "localhost",
+		Port: 5432, User: "app", Password: "s3cret", Database: "wh", Params: map[string]string{"sslmode": "disable"}}
+	if err := st.SaveConnection(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+
+	// An edit that changes the host and says nothing about the password.
+	c2 := c
+	c2.Password = ""
+	c2.Host = "elsewhere"
+	if err := st.SaveConnection(ctx, c2); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.GetConnection(ctx, "wh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Password != "s3cret" {
+		t.Errorf("password is %q; an edit that did not mention it should have kept it", got.Password)
+	}
+	if got.Host != "elsewhere" {
+		t.Errorf("host is %q; the edit should have applied", got.Host)
+	}
+	if got.Params["sslmode"] != "disable" {
+		t.Errorf("params came back as %v", got.Params)
+	}
+
+	// And an edit that does give one replaces it.
+	c3 := c
+	c3.Password = "rotated"
+	if err := st.SaveConnection(ctx, c3); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.GetConnection(ctx, "wh"); got.Password != "rotated" {
+		t.Errorf("password is %q; want the new one", got.Password)
 	}
 }

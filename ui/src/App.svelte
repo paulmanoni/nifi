@@ -3,6 +3,7 @@
   import { theme } from './lib/stores/theme.svelte';
   import { auth } from './lib/stores/auth.svelte';
   import Toasts from './lib/components/Toasts.svelte';
+  import StatusBar from './lib/components/StatusBar.svelte';
   import ConfirmDialog from './lib/components/ConfirmDialog.svelte';
   import FlowsPage from './routes/FlowsPage.svelte';
   import ConnectionsPage from './routes/ConnectionsPage.svelte';
@@ -66,6 +67,7 @@
       {#if theme.resolved === 'dark'}<Sun size={15} />{:else}<Moon size={15} />{/if}
     </button>
   </nav>
+  {#if !gated}<StatusBar />{/if}
   <main>
     {#if auth.signInRequired}
       <div class="gate">
@@ -125,37 +127,38 @@
     align-items: center;
     gap: 4px;
     padding: 0 12px;
-    background: var(--bg-elev);
-    border-bottom: 1px solid var(--border);
+    background: var(--chrome);
+    border-bottom: 1px solid #000;
   }
   .brand {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: 650;
-    font-size: 14px;
-    color: var(--text);
-    margin-right: 16px;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.01em;
+    color: var(--chrome-text);
+    margin-right: 18px;
     text-decoration: none;
   }
   .nav {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: var(--radius);
-    color: var(--text-2);
+    height: var(--topbar-h);
+    padding: 0 12px;
+    color: var(--chrome-text-2);
     font-weight: 500;
     text-decoration: none;
+    border-bottom: 2px solid transparent;
   }
   .nav:hover {
-    background: var(--bg-hover);
-    color: var(--text);
+    background: var(--chrome-2);
+    color: var(--chrome-text);
   }
   .nav.active {
-    background: var(--accent-soft);
-    color: var(--accent-text);
+    color: #fff;
+    border-bottom-color: var(--accent);
   }
   .user {
     display: inline-flex;
@@ -164,10 +167,10 @@
     height: 24px;
     padding: 0 9px;
     margin-right: 4px;
-    border-radius: 999px;
-    background: var(--bg-sunken);
-    color: var(--text-2);
-    font-size: 12px;
+    border-radius: var(--radius);
+    background: var(--chrome-2);
+    color: var(--chrome-text-2);
+    font-size: 11.5px;
     font-weight: 500;
   }
   .umenu {
@@ -245,9 +248,20 @@
     margin: 0;
     color: var(--text-2);
   }
+  /* Controls sitting on the dark header take its colours, not the page's. */
+  .topbar :global(.btn) {
+    color: var(--chrome-text-2);
+    background: transparent;
+    border-color: transparent;
+  }
+  .topbar :global(.btn:hover) {
+    background: var(--chrome-2);
+    color: var(--chrome-text);
+    border-color: transparent;
+  }
   .ver {
     font-size: 11px;
-    color: var(--text-3);
+    color: var(--chrome-text-2);
     margin-right: 6px;
   }
   main {

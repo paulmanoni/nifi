@@ -4,9 +4,10 @@
   import { DEFAULT_BACKPRESSURE, type FEdge } from './model';
   import { fmtCompact, fmtNum, pct } from '../format';
 
-  // Neutral smoothstep connection. The label pill appears only when it says
-  // something: the relationship (when the source has several), and the queue
-  // + back-pressure bar while a run is active.
+  // A connection carries a label the way it does on a NiFi canvas: a small
+  // box on the line naming the relationship and saying what is queued behind
+  // it. It is always there — "nothing queued" is itself worth seeing — and
+  // grows a back-pressure bar once a run gives it numbers.
   let { id, source, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, sourceHandleId, markerEnd, selected, data }: EdgeProps<FEdge> =
     $props();
 
@@ -26,7 +27,7 @@
   let issues = $derived(ctx.edgeIssues().get(id) ?? []);
   let tables = $derived(data?.edge.tables ?? []);
   let tablesText = $derived(tables.length <= 2 ? tables.join(', ') : `${tables.length} tables`);
-  let showLabel = $derived(multi || !!stats || selected || issues.length > 0 || tables.length > 0);
+  let showLabel = true;
 
   let prevPassed = -1;
   let flowing = $state(false);
@@ -59,63 +60,79 @@
         .filter(Boolean)
         .join('\n')}
     >
-      {#if multi || !tables.length}<span class="rel">{port}</span>{/if}
-      {#if tables.length}<span class="tb" title="Only these tables: {tables.join(', ')}">▦ {tablesText}</span>{/if}
-      {#if stats}
+      <div class="r1">
+        <span class="rel">{port}</span>
+        {#if tables.length}<span class="tb" title="Only these tables: {tables.join(', ')}">▦ {tablesText}</span>{/if}
+      </div>
+      <div class="r2">
+        <span class="qk">Queued</span>
         <span class="q">{fmtCompact(queued)}<span class="cap">/{fmtCompact(cap)}</span></span>
-        <span class="bar"><span class={level} style:width="{Math.max(fill, queued > 0 ? 4 : 0)}%"></span></span>
-      {/if}
+        {#if stats}<span class="bar"><span class={level} style:width="{Math.max(fill, queued > 0 ? 4 : 0)}%"></span></span>{/if}
+      </div>
     </div>
   </EdgeLabel>
 {/if}
 
 <style>
   .lbl {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 20px;
-    padding: 0 8px;
+    display: inline-block;
+    min-width: 96px;
+    padding: 2px 5px;
     background: var(--node-bg);
     border: 1px solid var(--node-border);
-    border-radius: 999px;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
-    font-size: 10.5px;
+    border-radius: var(--radius);
+    box-shadow: var(--node-shadow);
+    font-size: 10px;
+    line-height: 13px;
     color: var(--text-2);
     white-space: nowrap;
     cursor: pointer;
   }
   .lbl.sel {
     border-color: var(--accent);
-    color: var(--accent-text);
   }
   .lbl.issue {
     border-color: var(--warn);
   }
-  .rel {
-    font-weight: 500;
+  .r1 {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
   }
-  .tb {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--accent-text, var(--accent));
+  .r2 {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .rel {
+    font-weight: 600;
+    color: var(--text);
   }
   .lbl.fail .rel {
     color: var(--err);
+  }
+  .tb {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--accent-text, var(--accent));
+  }
+  .qk {
+    color: var(--text-3);
   }
   .q {
     font-family: var(--mono);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
     color: var(--text);
+    margin-left: auto;
   }
   .cap {
     color: var(--text-3);
   }
   .bar {
-    width: 32px;
-    height: 4px;
-    border-radius: 2px;
+    width: 28px;
+    height: 3px;
     background: var(--node-well);
     box-shadow: inset 0 0 0 1px var(--border);
     overflow: hidden;

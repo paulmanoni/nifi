@@ -58,6 +58,28 @@ nexusnifi.Module(nexusnifi.Config{
 `nexusnifi.Routes(cfg)...` spreads the same routes into an existing module so
 its `nexus.Path` prefix applies.
 
+### Connections
+
+A connection is a database flows read from or write to. There are two ways to
+have one, and both are listed together:
+
+- **Declared in code**, on `nifi.Config.Connections`. The credentials stay in
+  the host's own configuration and the UI cannot change them — it shows them
+  locked, so a flow referring to one can still be understood.
+- **Added in the UI**, kept in the state file. For pointing the tool at a
+  database without a redeploy.
+
+What the host declared always wins: a stored connection can never take over an
+id the application believes it owns, and the API refuses to write or delete
+one. Passwords are write-only either way — never returned by the API, and
+leaving the field empty on an edit keeps the one already stored rather than
+blanking it.
+
+A stored password sits in the state file in plain text, so treat that file as
+a secret: it is already where run history and dead-lettered rows live. Where
+that is not good enough, declare the connection in code and read the password
+from the host's own secret store.
+
 ## Authorization
 
 Every API call maps to one action: `view`, `edit` (change flows), `run`

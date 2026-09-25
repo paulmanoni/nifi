@@ -1,103 +1,127 @@
 :root {
-  --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  /* Apache NiFi's canvas is a working instrument, not a document: chrome is
+     slate, surfaces are flat and bordered rather than floated, corners are
+     nearly square, and colour is reserved for state. */
+  --font: 'Helvetica Neue', Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --bg: #f5f6f8;
+  --bg: #eceff1;
   --bg-elev: #ffffff;
-  --bg-sunken: #eef0f3;
-  --bg-hover: #f0f2f5;
-  --bg-active: #e6ebf5;
-  --canvas-bg: #f8f9fb;
-  --canvas-dot: #cdd2da;
+  --bg-sunken: #e3e7ea;
+  --bg-hover: #e8ecef;
+  --bg-active: #dce6ec;
+  --canvas-bg: #f6f7f8;
+  --canvas-dot: #d3d9dd;
   --node-bg: #ffffff;
-  --node-border: #d0d5dd;
-  --node-well: #f5f6f8;
-  --node-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
-  --node-shadow-hover: 0 2px 4px rgba(16, 24, 40, 0.08), 0 6px 14px rgba(16, 24, 40, 0.1);
-  --edge: #98a2b3;
-  --border: #dde1e7;
-  --border-strong: #c6ccd5;
-  --text: #1b1f27;
-  --text-2: #4a5263;
-  --text-3: #7a8394;
+  --node-border: #a8a8a8;
+  --node-well: #f4f6f7;
+  --node-shadow: 0 1px 1px rgba(0, 0, 0, 0.14);
+  --node-shadow-hover: 0 1px 3px rgba(0, 0, 0, 0.22);
+  --edge: #7f8c8d;
+  --border: #c9d1d6;
+  --border-strong: #a8b3ba;
+  --text: #262626;
+  --text-2: #4d5d68;
+  --text-3: #728e9b;
   --text-inv: #ffffff;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4fd7;
-  --accent-soft: #e5edfd;
-  --accent-text: #1d4ed8;
+  /* The slate that runs through NiFi's chrome, and its link blue. */
+  --chrome: #303030;
+  --chrome-2: #3c3c3c;
+  --chrome-text: #e4e8ea;
+  --chrome-text-2: #a6b3ba;
+  --slate: #728e9b;
+  --accent: #1491c1;
+  --accent-hover: #0f7ba5;
+  --accent-soft: #dceef5;
+  --accent-text: #106b8f;
 
-  --ok: #15803d;
-  --ok-soft: #e3f4e8;
-  --warn: #b45309;
-  --warn-soft: #fdf1dc;
-  --err: #c62828;
-  --err-soft: #fce8e8;
-  --info: #0369a1;
-  --info-soft: #e0f0fa;
-  --muted-soft: #eceef2;
+  /* Component state, in NiFi's own vocabulary. */
+  --ok: #3f9a4b;
+  --ok-soft: #e2f0e2;
+  --warn: #c7a03c;
+  --warn-soft: #faf2dd;
+  --err: #ba554a;
+  --err-soft: #f7e4e1;
+  --info: #1491c1;
+  --info-soft: #ddeef5;
+  --muted-soft: #e3e7ea;
+  --stopped: #ba554a;
+  --running: #3f9a4b;
+  --invalid: #c7a03c;
+  --disabled: #8a8a8a;
 
-  --cat-source: #2563eb;
-  --cat-transform: #7c3aed;
-  --cat-route: #d97706;
-  --cat-script: #0d9488;
-  --cat-sink: #16a34a;
+  --cat-source: #1491c1;
+  --cat-transform: #7b5ea7;
+  --cat-route: #c7822e;
+  --cat-script: #2e8b8b;
+  --cat-sink: #3f9a4b;
 
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
-  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.08);
-  --radius: 6px;
-  --radius-sm: 4px;
-  --radius-lg: 10px;
+  --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.12);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --shadow-lg: 0 6px 20px rgba(0, 0, 0, 0.28);
+  --radius: 2px;
+  --radius-sm: 2px;
+  --radius-lg: 3px;
 
-  --topbar-h: 44px;
+  --topbar-h: 38px;
+  --statusbar-h: 28px;
   color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --bg: #0f1115;
-  --bg-elev: #171a21;
-  --bg-sunken: #0b0d11;
-  --bg-hover: #1f232c;
-  --bg-active: #1c2740;
-  --canvas-bg: #0d0f13;
-  --canvas-dot: #262b35;
-  --node-bg: #1a1e26;
-  --node-border: #313846;
-  --node-well: #141820;
-  --node-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
-  --node-shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.5), 0 8px 18px rgba(0, 0, 0, 0.45);
-  --edge: #5d6677;
-  --border: #272c36;
-  --border-strong: #363c49;
-  --text: #e6e9ef;
-  --text-2: #a9b0bd;
-  --text-3: #737b8a;
+  --bg: #1b1f22;
+  --bg-elev: #24292d;
+  --bg-sunken: #16191c;
+  --bg-hover: #2c3237;
+  --bg-active: #2a3a44;
+  --canvas-bg: #191d20;
+  --canvas-dot: #2e353a;
+  --node-bg: #262c31;
+  --node-border: #495158;
+  --node-well: #1f2427;
+  --node-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+  --node-shadow-hover: 0 1px 4px rgba(0, 0, 0, 0.6);
+  --edge: #7f8c8d;
+  --border: #363d43;
+  --border-strong: #4c555c;
+  --text: #dde3e6;
+  --text-2: #a6b3ba;
+  --text-3: #7f939e;
 
-  --accent: #4f8cff;
-  --accent-hover: #6b9dff;
-  --accent-soft: #1a2945;
-  --accent-text: #8cb2ff;
+  --chrome: #17191b;
+  --chrome-2: #202325;
+  --chrome-text: #dde3e6;
+  --chrome-text-2: #93a3ac;
+  --slate: #728e9b;
+  --accent: #3fb0da;
+  --accent-hover: #5ec3e8;
+  --accent-soft: #14323f;
+  --accent-text: #6cc6e8;
 
-  --ok: #4ade80;
-  --ok-soft: #13291c;
-  --warn: #fbbf24;
-  --warn-soft: #2e2410;
-  --err: #f87171;
-  --err-soft: #331819;
-  --info: #38bdf8;
-  --info-soft: #0f2533;
-  --muted-soft: #1e222a;
+  --ok: #5cb567;
+  --ok-soft: #172a19;
+  --warn: #d9b757;
+  --warn-soft: #2c2614;
+  --err: #d47b6e;
+  --err-soft: #2e1c19;
+  --info: #3fb0da;
+  --info-soft: #12303c;
+  --muted-soft: #23282c;
+  --stopped: #d47b6e;
+  --running: #5cb567;
+  --invalid: #d9b757;
+  --disabled: #7d868c;
 
-  --cat-source: #4f8cff;
-  --cat-transform: #a78bfa;
-  --cat-route: #f59e0b;
-  --cat-script: #2dd4bf;
-  --cat-sink: #4ade80;
+  --cat-source: #3fb0da;
+  --cat-transform: #9d84c9;
+  --cat-route: #d9a05b;
+  --cat-script: #45a8a8;
+  --cat-sink: #5cb567;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.5);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 8px 26px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
@@ -114,8 +138,8 @@ body,
 
 body {
   font-family: var(--font);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -140,7 +164,7 @@ h4 {
 code,
 .mono {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 ::selection {
@@ -372,22 +396,28 @@ code,
 }
 .table th {
   text-align: left;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-3);
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
   position: sticky;
   top: 0;
   z-index: 1;
+  white-space: nowrap;
 }
+/* Rows are read in bulk, so they are sized to be scanned, not admired. */
 .table td {
-  padding: 8px 12px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+}
+/* Banding makes a long table trackable across its width. */
+.table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-sunken) 45%, transparent);
 }
 .table tr.clickable {
   cursor: pointer;

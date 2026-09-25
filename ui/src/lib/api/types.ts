@@ -86,6 +86,22 @@ export type Connection = {
   user: string;
   database: string;
   description?: string;
+  /** Added here rather than declared by the application, so it can be changed here. */
+  managed?: boolean;
+};
+
+/** What a connection is saved with. The password is write-only: it is never
+ *  returned, and leaving it empty on an edit keeps the one already stored. */
+export type ConnectionInput = {
+  name: string;
+  driver: Driver;
+  host: string;
+  port?: number;
+  user: string;
+  password?: string;
+  database: string;
+  description?: string;
+  params?: Record<string, string>;
 };
 
 export type ConnectionTestResult =

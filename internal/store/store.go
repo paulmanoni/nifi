@@ -15,6 +15,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/paulmanoni/nifi/internal/dbx"
 	"github.com/paulmanoni/nifi/internal/model"
 )
 
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS chunks (
   PRIMARY KEY (run_id, node_id, tbl, seq));
 CREATE TABLE IF NOT EXISTS run_kv (run_id TEXT, key TEXT, value TEXT, PRIMARY KEY (run_id, key));
 CREATE TABLE IF NOT EXISTS flow_kv (flow_id TEXT, key TEXT, value TEXT, PRIMARY KEY (flow_id, key));
+CREATE TABLE IF NOT EXISTS connections (
+	id TEXT PRIMARY KEY, name TEXT, driver TEXT, host TEXT, port INTEGER,
+	username TEXT, password TEXT, dbname TEXT, params TEXT, description TEXT,
+	max_conns INTEGER, updated_at TIMESTAMP);
 CREATE TABLE IF NOT EXISTS bulletins (
   run_id TEXT, seq INTEGER, time TEXT, level TEXT, node_id TEXT, tbl TEXT, message TEXT, PRIMARY KEY (run_id, seq));
 CREATE TABLE IF NOT EXISTS deadletters (
@@ -511,6 +516,102 @@ func (s *Store) GetFlowKV(ctx context.Context, flowID, key string) (string, bool
 func (s *Store) ClearFlowKV(ctx context.Context, flowID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM flow_kv WHERE flow_id=?`, flowID)
 	return err
+}
+
+// ---- connections ----
+//
+// A connection the host declared in code is authoritative and lives nowhere
+// but its Config. These are the ones somebody added here instead, kept so the
+// tool can be pointed at a database without a redeploy. The password is
+// written but never read back out of the API — dbx.Connection keeps it out of
+// JSON, and nothing here puts it in.
+
+// ListConnections returns the stored connections, ordered by name.
+func (s *Store) ListConnections(ctx context.Context) ([]dbx.Connection, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, driver, host, port, username, password,
+		dbname, params, description, max_conns FROM connections ORDER BY name, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []dbx.Connection
+	for rows.Next() {
+		c, err := scanConnection(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// GetConnection returns one stored connection, ErrNotFound when there is none.
+func (s *Store) GetConnection(ctx context.Context, id string) (dbx.Connection, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, driver, host, port, username, password,
+		dbname, params, description, max_conns FROM connections WHERE id=?`, id)
+	c, err := scanConnection(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return dbx.Connection{}, fmt.Errorf("%w: connection %q", ErrNotFound, id)
+	}
+	return c, err
+}
+
+type scanner interface{ Scan(...any) error }
+
+func scanConnection(r scanner) (dbx.Connection, error) {
+	var c dbx.Connection
+	var params, name, host, user, pw, dbname, desc sql.NullString
+	var port, maxConns sql.NullInt64
+	if err := r.Scan(&c.ID, &name, &c.Driver, &host, &port, &user, &pw, &dbname, &params, &desc, &maxConns); err != nil {
+		return dbx.Connection{}, err
+	}
+	c.Name, c.Host, c.User, c.Password = name.String, host.String, user.String, pw.String
+	c.Database, c.Description = dbname.String, desc.String
+	c.Port, c.MaxConns = int(port.Int64), int(maxConns.Int64)
+	if params.String != "" {
+		_ = json.Unmarshal([]byte(params.String), &c.Params)
+	}
+	return c, nil
+}
+
+// SaveConnection creates or replaces a stored connection. An empty password
+// on an existing one keeps the password already stored, so an edit that does
+// not mean to change it cannot blank it by omission.
+func (s *Store) SaveConnection(ctx context.Context, c dbx.Connection) error {
+	if c.Password == "" {
+		if old, err := s.GetConnection(ctx, c.ID); err == nil {
+			c.Password = old.Password
+		}
+	}
+	params := ""
+	if len(c.Params) > 0 {
+		b, err := json.Marshal(c.Params)
+		if err != nil {
+			return err
+		}
+		params = string(b)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO connections
+		(id, name, driver, host, port, username, password, dbname, params, description, max_conns, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT (id) DO UPDATE SET name=excluded.name, driver=excluded.driver, host=excluded.host,
+			port=excluded.port, username=excluded.username, password=excluded.password, dbname=excluded.dbname,
+			params=excluded.params, description=excluded.description, max_conns=excluded.max_conns,
+			updated_at=excluded.updated_at`,
+		c.ID, c.Name, c.Driver, c.Host, c.Port, c.User, c.Password, c.Database, params, c.Description,
+		c.MaxConns, time.Now().UTC())
+	return err
+}
+
+func (s *Store) DeleteConnection(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM connections WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: connection %q", ErrNotFound, id)
+	}
+	return nil
 }
 
 // ---- bulletins ----

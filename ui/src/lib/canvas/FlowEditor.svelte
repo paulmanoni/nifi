@@ -4,8 +4,6 @@
     SvelteFlow,
     Background,
     BackgroundVariant,
-    Controls,
-    MiniMap,
     MarkerType,
     useSvelteFlow,
     type Connection,
@@ -43,6 +41,7 @@
   import BottomPanel from './BottomPanel.svelte';
   import StatusPill from '../components/StatusPill.svelte';
   import RunControls from '../run/RunControls.svelte';
+  import CanvasPalettes from './CanvasPalettes.svelte';
   import DependenciesModal from '../flows/DependenciesModal.svelte';
   import ScheduleModal from '../flows/ScheduleModal.svelte';
   import HistoryModal from '../flows/HistoryModal.svelte';
@@ -842,8 +841,20 @@
           proOptions={{ hideAttribution: true }}
         >
           <Background variant={BackgroundVariant.Dots} gap={14} size={1} />
-          <Controls showLock={false} fitViewOptions={{ maxZoom: 1.1, padding: 0.15 }} />
-          <MiniMap pannable zoomable nodeStrokeWidth={2} width={160} height={110} />
+          <CanvasPalettes
+            node={selectedNode?.data.node ?? null}
+            edge={selectedEdge?.data?.edge ?? null}
+            readOnly={!canEdit}
+            onconfigure={() => {
+              if (selectedNode) openNode(selectedNode.id);
+              else if (selectedEdge) selectEdge(selectedEdge.id);
+            }}
+            ontoggle={() => selectedNode && updateNode(selectedNode.id, { disabled: !selectedNode.data.node.disabled })}
+            ondelete={() => {
+              if (selectedNode) deleteNode(selectedNode.id);
+              else if (selectedEdge) deleteEdge(selectedEdge.id);
+            }}
+          />
         </SvelteFlow>
         {#if nodes.length === 0}
           <div class="blank">

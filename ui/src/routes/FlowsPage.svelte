@@ -53,13 +53,15 @@
 
   const VIEW_KEY = 'nifi.flowsView';
   type View = 'cards' | 'table' | 'graph';
+  // A table by default: an operator watching a hundred flows wants them all
+  // on one screen, and cards spend a card's worth of space on each.
   let view = $state<View>(
     (() => {
       try {
         const v = localStorage.getItem(VIEW_KEY);
-        return v === 'graph' || v === 'table' ? v : 'cards';
+        return v === 'graph' || v === 'cards' ? v : 'table';
       } catch {
-        return 'cards';
+        return 'table';
       }
     })(),
   );

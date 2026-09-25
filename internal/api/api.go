@@ -90,6 +90,8 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/types", ActionView, func(http.ResponseWriter, *http.Request) (any, error) { return flow.TypeOptions(), nil })
 
 	h("GET /api/connections", ActionView, s.listConnections)
+	h("PUT /api/connections/{id}", ActionEdit, s.saveConnection)
+	h("DELETE /api/connections/{id}", ActionEdit, s.deleteConnection)
 	h("POST /api/connections/test", ActionData, s.testConnection)
 	h("GET /api/connections/{id}/tables", ActionData, s.listTables)
 	h("GET /api/connections/{id}/tables/{table}", ActionData, s.describeTable)
@@ -148,6 +150,12 @@ func (e httpError) Error() string { return e.msg }
 
 func badRequest(format string, args ...any) error {
 	return httpError{http.StatusBadRequest, fmt.Sprintf(format, args...)}
+}
+
+// conflict is for a request that is well formed but asks for something the
+// current state does not allow.
+func conflict(format string, args ...any) error {
+	return httpError{http.StatusConflict, fmt.Sprintf(format, args...)}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -242,12 +250,97 @@ func (s *Server) meta(_ http.ResponseWriter, r *http.Request) (any, error) {
 		"auth": mode, "maxParallelRuns": s.Runs.MaxParallel, "authenticated": s.allow(r, ActionView) == nil || mode == "none"}, nil
 }
 
-// ---- connections (declared in code; read-only here) ----
+// ---- connections ----
+//
+// Two kinds, listed together. The ones the host declared in code cannot be
+// touched here — they are the application's own wiring — and the rest were
+// added through this API and live in the state store. Neither ever returns a
+// password: dbx.Connection keeps it out of JSON.
 
-func (s *Server) listConnections(http.ResponseWriter, *http.Request) (any, error) {
-	out := make([]dbx.Connection, len(s.Conns))
-	copy(out, s.Conns)
+type connectionOut struct {
+	dbx.Connection
+	// Managed marks a connection this API may change. The others come from
+	// the application's configuration and are shown so a flow referring to
+	// one can be understood, not edited.
+	Managed bool `json:"managed"`
+}
+
+func (s *Server) listConnections(_ http.ResponseWriter, r *http.Request) (any, error) {
+	out := make([]connectionOut, 0, len(s.Conns))
+	for _, c := range s.Conns {
+		out = append(out, connectionOut{Connection: c})
+	}
+	stored, err := s.Store.ListConnections(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range stored {
+		if s.declared(c.ID) {
+			continue // the application's own wins; see saveConnection
+		}
+		out = append(out, connectionOut{Connection: c, Managed: true})
+	}
 	return out, nil
+}
+
+// declared reports whether the host configured this id in code.
+func (s *Server) declared(id string) bool {
+	for _, c := range s.Conns {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) saveConnection(_ http.ResponseWriter, r *http.Request) (any, error) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	if s.declared(id) {
+		return nil, conflict("%q is declared by the application and is changed where that is configured", id)
+	}
+	var c dbx.Connection
+	if err := decode(r, &c); err != nil {
+		return nil, err
+	}
+	c.ID = id
+	if c.Name == "" {
+		c.Name = c.ID
+	}
+	if c.Driver == "postgresql" {
+		c.Driver = "postgres"
+	}
+	if c.ID == "" || c.Driver == "" {
+		return nil, badRequest("a connection needs an id and a driver")
+	}
+	if c.Driver != "mysql" && c.Driver != "postgres" {
+		return nil, badRequest("driver must be mysql or postgres")
+	}
+	if err := s.Store.SaveConnection(r.Context(), c); err != nil {
+		return nil, err
+	}
+	return connectionOut{Connection: mask(c), Managed: true}, nil
+}
+
+func (s *Server) deleteConnection(_ http.ResponseWriter, r *http.Request) (any, error) {
+	id := r.PathValue("id")
+	if s.declared(id) {
+		return nil, conflict("%q is declared by the application", id)
+	}
+	// A flow pointing at a connection that is gone fails at its next run with
+	// a clear message, so say which flows would be affected rather than
+	// refusing outright: the operator may be replacing it.
+	if err := s.Store.DeleteConnection(r.Context(), id); err != nil {
+		return nil, err
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+// mask clears the password on a value about to be returned. dbx.Connection
+// already keeps it out of JSON; this makes that true of the value as well, so
+// a future change to the tag cannot turn a response into a leak.
+func mask(c dbx.Connection) dbx.Connection {
+	c.Password = ""
+	return c
 }
 
 func (s *Server) testConnection(_ http.ResponseWriter, r *http.Request) (any, error) {
