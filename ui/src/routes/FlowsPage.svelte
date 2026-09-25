@@ -169,6 +169,7 @@
   let ungrouped = $derived(countUngrouped(flows ?? []));
   let trail = $derived(breadcrumb(scope));
   let scoped = $derived(filtered.filter((f) => inScope(f, scope)));
+  let inScopeAll = $derived((flows ?? []).filter((f) => inScope(f, scope)));
   let allShownSelected = $derived(scoped.length > 0 && scoped.every((f) => selected.has(f.id)));
 
   function pickScope(path: string) {
@@ -350,11 +351,11 @@
       <button role="tab" aria-selected={view === 'table'} class:on={view === 'table'} onclick={() => setView('table')}><Table2 size={13} /> Table</button>
       <button role="tab" aria-selected={view === 'graph'} class:on={view === 'graph'} onclick={() => setView('graph')}><Network size={13} /> Graph</button>
     </div>
+    <div class="search">
+      <Search size={14} />
+      <input class="input" placeholder={view === 'graph' ? 'Highlight flows…' : 'Filter flows…'} bind:value={q} />
+    </div>
     {#if view !== 'graph'}
-      <div class="search">
-        <Search size={14} />
-        <input class="input" placeholder="Filter flows…" bind:value={q} />
-      </div>
       <select class="select sortsel" bind:value={sort} aria-label="Sort flows">
         <option value="updated">Recently updated</option>
         <option value="name">Name</option>
@@ -457,7 +458,7 @@
       </div>
     {:else if view === 'graph'}
       <SvelteFlowProvider>
-        <DepGraph {flows} {runs} />
+        <DepGraph flows={inScopeAll} {runs} scope={scope === UNGROUPED ? '' : scope} highlight={q} />
       </SvelteFlowProvider>
       <div class="legend tiny">
         <span><i class="l never"></i>never run</span>

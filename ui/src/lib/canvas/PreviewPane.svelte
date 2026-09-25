@@ -97,6 +97,15 @@
     return { changed, added };
   }
 
+  // A stage can drop twenty columns at once. The names matter when you go
+  // looking, the count matters at a glance, so the badge shows a few and keeps
+  // the rest in its tooltip instead of growing off the side of the pane.
+  const SHOWN = 4;
+  function brief(names: string[]): string {
+    if (names.length <= SHOWN) return names.join(', ');
+    return `${names.slice(0, SHOWN).join(', ')} +${names.length - SHOWN} more`;
+  }
+
   function removed(i: number): string[] {
     const cur = stages[i];
     const prev = stages[i - 1];
@@ -172,9 +181,15 @@
             {#if stacked || d.changed.size || d.added.size || rm.length}
               <div class="sh">
                 {#if stacked}<strong>{s.name}</strong><span class="muted tiny mono">{s.type}</span>{/if}
-                {#if d.added.size}<span class="badge ok">+{[...d.added].join(', ')}</span>{/if}
-                {#if d.changed.size}<span class="badge warn">~{[...d.changed].join(', ')}</span>{/if}
-                {#if rm.length}<span class="badge err">−{rm.join(', ')}</span>{/if}
+                {#if d.added.size}
+                  <span class="badge ok list" title="Added: {[...d.added].join(', ')}">+{brief([...d.added])}</span>
+                {/if}
+                {#if d.changed.size}
+                  <span class="badge warn list" title="Changed: {[...d.changed].join(', ')}">~{brief([...d.changed])}</span>
+                {/if}
+                {#if rm.length}
+                  <span class="badge err list" title="Dropped: {rm.join(', ')}">−{brief(rm)}</span>
+                {/if}
               </div>
             {/if}
             <div class="gbox">
@@ -291,5 +306,15 @@
     gap: 6px;
     flex-wrap: wrap;
     font-size: 12px;
+    min-width: 0;
+  }
+  /* A badge listing column names must give way to the pane, not push past it. */
+  .sh :global(.badge.list) {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    line-height: 18px;
   }
 </style>

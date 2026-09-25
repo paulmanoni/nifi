@@ -11,7 +11,7 @@
 
 <header class="top">
   <span class="name">nifi</span>
-  <span class="ver">v0.4.0</span>
+  <span class="ver">v0.5.0</span>
   <nav>
     <a href="#start">Start</a>
     <a href="#flows">Flows</a>
@@ -85,7 +85,7 @@
 
 <section id="start">
   <h2>Install and embed</h2>
-<pre><code>go get github.com/paulmanoni/nifi@v0.4.0</code></pre>
+<pre><code>go get github.com/paulmanoni/nifi@v0.5.0</code></pre>
   <p>The whole thing is one handler. Mount it wherever you like:</p>
 <pre><code>package main
 
@@ -124,7 +124,7 @@ func main() {
   </p>
   <h3>Or standalone</h3>
   <p>There is a command for trying it without writing any Go:</p>
-<pre><code>go run github.com/paulmanoni/nifi/cmd/nifi@v0.4.0 -addr :8090 -config connections.json</code></pre>
+<pre><code>go run github.com/paulmanoni/nifi/cmd/nifi@v0.5.0 -addr :8090 -config connections.json</code></pre>
 </section>
 
 <section id="connections">
@@ -496,7 +496,7 @@ nifi.Config{Processors: []nifi.Processor{
 <footer>
   <p>
     nifi is released under its repository's licence. Documentation for
-    <a href="https://github.com/paulmanoni/nifi/releases">v0.4.0</a> ·
+    <a href="https://github.com/paulmanoni/nifi/releases">v0.5.0</a> ·
     <a href="https://pkg.go.dev/github.com/paulmanoni/nifi">Go reference</a> ·
     <a href="https://github.com/paulmanoni/nifi/issues">Issues</a>
   </p>

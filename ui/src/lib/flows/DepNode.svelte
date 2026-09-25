@@ -3,7 +3,18 @@
   import type { RunSummary } from '../api/types';
   import { fmtCompact } from '../format';
 
-  type DepData = { name: string; run?: RunSummary; waiting: string[]; hasIn: boolean; hasOut: boolean };
+  type DepData = {
+    name: string;
+    run?: RunSummary;
+    waiting: string[];
+    hasIn: boolean;
+    hasOut: boolean;
+    /** Inside a lane the node is one line, so a folder's worth of them fits. */
+    compact?: boolean;
+    /** A search is running and this is not one of the matches. */
+    dim?: boolean;
+    hit?: boolean;
+  };
   let { data }: NodeProps<Node<DepData>> = $props();
 
   let status = $derived(data.run?.status ?? 'never');
@@ -20,12 +31,12 @@
   );
 </script>
 
-<div class="dn {status}" title="{data.name}\n{sub}">
+<div class="dn {status}" class:compact={data.compact} class:dim={data.dim} class:hit={data.hit} title="{data.name}\n{sub}">
   <div class="top">
     <span class="dot"></span>
     <span class="name">{data.name}</span>
   </div>
-  <div class="sub">{sub}</div>
+  {#if !data.compact}<div class="sub">{sub}</div>{/if}
   {#if data.hasIn}<Handle type="target" position={Position.Left} isConnectable={false} class="dh" />{/if}
   {#if data.hasOut}<Handle type="source" position={Position.Right} isConnectable={false} class="dh" />{/if}
 </div>
@@ -35,6 +46,7 @@
     --c: var(--text-3);
     width: 220px;
     padding: 8px 10px 8px 12px;
+    box-sizing: border-box;
     background: var(--node-bg);
     border: 1px solid var(--node-border);
     border-left: 3px solid var(--c);
@@ -64,6 +76,31 @@
   }
   .dn.stopped {
     --c: var(--text-2);
+  }
+  .dn.compact {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding: 0 8px 0 9px;
+    border-radius: var(--radius);
+  }
+  .dn.compact .name {
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .dn.compact .dot {
+    width: 6px;
+    height: 6px;
+  }
+  /* A search dims what it did not find rather than hiding it, so the shape of
+     the graph stays put while you look. */
+  .dn.dim {
+    opacity: 0.3;
+  }
+  .dn.hit {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
   }
   .top {
     display: flex;
