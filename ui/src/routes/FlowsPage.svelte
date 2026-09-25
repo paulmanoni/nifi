@@ -8,6 +8,7 @@
   import { toast, toasts } from '../lib/stores/toast.svelte';
   import { confirm } from '../lib/stores/confirm.svelte';
   import { auth } from '../lib/stores/auth.svelte';
+  import { live } from '../lib/stores/live.svelte';
   import { fmtCompact, fmtNum, fmtRelative } from '../lib/format';
   import { latestRuns, waitingFor } from '../lib/flows/status';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -89,38 +90,38 @@
     } catch {}
   }
 
-  // ---------- polling: 2s while anything is active, 15s otherwise ----------
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let destroyed = false;
+  // ---------- state arrives on the instance stream, not on a timer ----------
+  const unwatch = live.watch();
+  $effect(() => {
+    if (live.flows) flows = live.flows;
+    active = live.runs;
+    // Estimated totals for the progress bars of running runs (one detail fetch per run).
+    for (const r of active) {
+      if (r.status === 'pending' || estimates[r.id]) continue;
+      api
+        .run(r.id)
+        .then((d) => {
+          const est = (d.tables ?? []).reduce((s, t) => s + (t.estimatedRows || 0), 0);
+          if (est) estimates[r.id] = est;
+        })
+        .catch(() => {});
+    }
+  });
+  onDestroy(unwatch);
 
+  // The stream carries every change within a second, but an operator who just
+  // clicked Run should not wait for it: refresh that one time, and let the
+  // stream keep it current afterwards.
   async function poll() {
-    clearTimeout(timer);
     try {
       const [f, a] = await Promise.all([api.flows(), api.activeRuns()]);
       flows = f ?? [];
       active = a ?? [];
-      // Estimated totals for the progress bars of running runs (one detail fetch per run).
-      for (const r of active) {
-        if (r.status === 'pending' || estimates[r.id]) continue;
-        api
-          .run(r.id)
-          .then((d) => {
-            const est = (d.tables ?? []).reduce((s, t) => s + (t.estimatedRows || 0), 0);
-            if (est) estimates[r.id] = est;
-          })
-          .catch(() => {});
-      }
     } catch (e) {
       toast.error(e);
       flows ??= [];
     }
-    if (!destroyed) timer = setTimeout(poll, active.some((r) => isActive(r.status)) ? 2000 : 15000);
   }
-  poll();
-  onDestroy(() => {
-    destroyed = true;
-    clearTimeout(timer);
-  });
 
   let runs = $derived(latestRuns(flows ?? [], active));
   let byId = $derived(new Map((flows ?? []).map((f) => [f.id, f])));

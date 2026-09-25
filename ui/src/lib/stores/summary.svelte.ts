@@ -3,7 +3,7 @@
 //
 // Apache NiFi keeps this strip under the header because an operator watching a
 // hundred flows needs the totals in view at all times, not a page away.
-import { api } from '../api/client';
+import { live } from './live.svelte';
 import type { Flow, RunSummary } from '../api/types';
 
 export type Counts = {
@@ -27,42 +27,31 @@ class Summary {
   counts = $state<Counts>({ ...zero });
   loaded = $state(false);
   error = $state('');
-  private timer: ReturnType<typeof setInterval> | undefined;
-  private watchers = 0;
-
-  /** Start refreshing while anything is on screen that shows the bar. */
+  /** Keep the bar fed while anything on screen shows it. */
   watch() {
-    this.watchers++;
-    if (this.watchers === 1) {
-      this.refresh();
-      this.timer = setInterval(() => this.refresh(), 5000);
-    }
+    const stop = live.watch();
+    // The instance stream is the only source now; the bar simply reflects it.
+    const off = $effect.root(() => {
+      $effect(() => {
+        const flows = live.flows;
+        if (!flows) return;
+        this.counts = tally(flows, live.runs);
+        this.loaded = true;
+        this.error = live.error;
+      });
+    });
     return () => {
-      this.watchers--;
-      if (this.watchers === 0) {
-        clearInterval(this.timer);
-        this.timer = undefined;
-      }
+      off();
+      stop();
     };
-  }
-
-  async refresh() {
-    try {
-      const [flows, active] = await Promise.all([api.flows(), api.activeRuns()]);
-      this.counts = tally(flows ?? [], active ?? []);
-      this.loaded = true;
-      this.error = '';
-    } catch (e) {
-      this.error = (e as Error).message;
-    }
   }
 }
 
 function tally(flows: Flow[], active: RunSummary[]): Counts {
   const c: Counts = { ...zero, flows: flows.length };
-  const live = new Map(active.map((r) => [r.flowId, r]));
+  const byFlow = new Map(active.map((r) => [r.flowId, r]));
   for (const f of flows) {
-    const run = live.get(f.id) ?? f.lastRun;
+    const run = byFlow.get(f.id) ?? f.lastRun;
     if (!run) {
       c.neverRun++;
       continue;

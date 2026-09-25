@@ -45,6 +45,9 @@ type Server struct {
 	// they cannot be edited from the UI.
 	Fixed []model.Parameter
 	index sync.Map // base → injected index.html
+
+	live     *liveHub
+	liveOnce sync.Once
 }
 
 type baseKey struct{}
@@ -76,6 +79,12 @@ func (s *Server) Handler() http.Handler {
 			if err != nil {
 				writeErr(w, err)
 				return
+			}
+			// Anything that succeeded and was not a read has moved instance
+			// state, so watchers of /api/live get it on the next sweep. One
+			// hook here covers every mutating endpoint, including later ones.
+			if action != ActionView && action != ActionNone && r.Method != http.MethodGet {
+				s.Changed()
 			}
 			if v != nil {
 				writeJSON(w, http.StatusOK, v)
@@ -134,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/runs/{id}/queues", ActionData, s.queues)
 	h("POST /api/runs/{id}/queues/{edge}/empty", ActionRun, s.emptyQueue)
 	mux.HandleFunc("GET /api/runs/{id}/events", s.guard(ActionView, s.events))
+	mux.HandleFunc("GET /api/live", s.guard(ActionView, s.liveStream))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, httpError{http.StatusNotFound, "no such endpoint"})
 	})
@@ -409,16 +419,21 @@ func (s *Server) describeTable(_ http.ResponseWriter, r *http.Request) (any, err
 // ---- flows ----
 
 func (s *Server) listFlows(_ http.ResponseWriter, r *http.Request) (any, error) {
-	flows, err := s.Store.ListFlows(r.Context())
+	return s.flowList(r.Context())
+}
+
+// flowList is what GET /api/flows answers, shared with the live stream.
+func (s *Server) flowList(ctx context.Context) ([]model.Flow, error) {
+	flows, err := s.Store.ListFlows(ctx)
 	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	for i := range flows {
 		flows[i].NextRun = flow.NextRun(flows[i], now)
-		if runs, err := s.Store.ListRuns(r.Context(), flows[i].ID, 1); err == nil && len(runs) > 0 {
+		if runs, err := s.Store.ListRuns(ctx, flows[i].ID, 1); err == nil && len(runs) > 0 {
 			run := runs[0]
-			if d, err := s.Runs.Detail(r.Context(), run.ID); err == nil {
+			if d, err := s.Runs.Detail(ctx, run.ID); err == nil {
 				run = d.RunSummary
 			}
 			flows[i].LastRun = &run
