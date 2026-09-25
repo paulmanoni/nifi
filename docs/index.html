@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en" >
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nifi — embeddable data-flow migrations for Go</title>
+<meta name="description" content="An embeddable Go library for moving databases: build migrations on a canvas, run them resumably, and follow the changes afterwards.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="top">
+  <span class="name">nifi</span>
+  <span class="ver">v0.2.0</span>
+  <nav>
+    <a href="#start">Start</a>
+    <a href="#flows">Flows</a>
+    <a href="#extending">Extending</a>
+    <a href="#api">HTTP API</a>
+    <a href="https://github.com/paulmanoni/nifi">GitHub</a>
+    <a href="https://pkg.go.dev/github.com/paulmanoni/nifi">pkg.go.dev</a>
+  </nav>
+</header>
+
+<div class="wrap">
+<aside>
+  <h4>Getting started</h4>
+  <a href="#what">What it is</a>
+  <a href="#start">Install and embed</a>
+  <a href="#connections">Connections</a>
+  <a href="#nexus">Inside a nexus app</a>
+  <a href="#auth">Authorization</a>
+
+  <h4>Building flows</h4>
+  <a href="#flows">Processors</a>
+  <a href="#expressions">Expressions</a>
+  <a href="#scripts">Scripts</a>
+  <a href="#parameters">Parameters</a>
+  <a href="#schedules">Schedules and folders</a>
+
+  <h4>Running them</h4>
+  <a href="#running">What a run does</a>
+  <a href="#safety">Chunks, resume, dead letters</a>
+  <a href="#live">Following changes</a>
+
+  <h4>Extending</h4>
+  <a href="#extending">A node from a function</a>
+  <a href="#schematic">Declaring a schema</a>
+  <a href="#gormx">Writing a GORM model</a>
+  <a href="#functions">Expression functions</a>
+
+  <h4>Reference</h4>
+  <a href="#seeding">Seeding flows</a>
+  <a href="#api">HTTP API</a>
+</aside>
+
+<main>
+
+<section id="what">
+  <h1>nifi</h1>
+  <p class="lede">
+    An embeddable Go library for moving databases. Build a migration on a canvas, run it in
+    resumable chunks, and — when the source keeps changing — have the same flow follow it
+    afterwards. It mounts inside a service you already have, as one <code>http.Handler</code>.
+  </p>
+  <div class="note warn">
+    <strong>Not Apache NiFi, and not from the Apache Software Foundation.</strong>
+    The interface is deliberately modelled on Apache NiFi's, because that is the shape an
+    operator already knows — but this shares none of its code, runs none of its processors and
+    reads none of its flow definitions. Apache®, Apache NiFi, NiFi and the feather logo are
+    trademarks of the <a href="https://apache.org">Apache Software Foundation</a>; this project
+    is not endorsed by or affiliated with it. Looking for Apache NiFi? It is at
+    <a href="https://nifi.apache.org">nifi.apache.org</a>.
+  </div>
+  <p>It moves <strong>MySQL → PostgreSQL</strong> and <strong>PostgreSQL → PostgreSQL</strong>.</p>
+  <table>
+    <tr><th>You get</th><th>Which means</th></tr>
+    <tr><td>A canvas</td><td>Sources, transforms and sinks with generated forms, and a preview of real rows at any node before anything runs.</td></tr>
+    <tr><td>An engine</td><td>Parallel key-range chunks, bounded queues with back-pressure, PostgreSQL <code>COPY</code> through a staging table.</td></tr>
+    <tr><td>Exact restarts</td><td>A chunk is checkpointed only once every batch from it is written, so a stopped run resumes on the first row it did not finish.</td></tr>
+    <tr><td>Somewhere for bad rows</td><td>A row the destination refuses is found, set aside with its reason, and can be replayed once the flow is fixed.</td></tr>
+    <tr><td>One binary</td><td><code>ui/dist</code> ships in the module: no Node at build or run time for anything that depends on this.</td></tr>
+  </table>
+</section>
+
+<section id="start">
+  <h2>Install and embed</h2>
+<pre><code>go get github.com/paulmanoni/nifi@v0.2.0</code></pre>
+  <p>The whole thing is one handler. Mount it wherever you like:</p>
+<pre><code>package main
+
+import (
+    "context"
+    "log"
+    "net/http"
+    "os"
+
+    "github.com/paulmanoni/nifi"
+)
+
+func main() {
+    engine, err := nifi.New(nifi.Config{
+        Title:    "Data Flows",
+        DataPath: "var/nifi.db",           // management state (SQLite)
+        Connections: []nifi.Connection{
+            {ID: "legacy", Driver: "mysql", Host: "10.0.0.5", User: "ro",
+             Password: os.Getenv("LEGACY_PW"), Database: "app"},
+            {ID: "main", Driver: "postgres", Host: "localhost", User: "app",
+             Password: os.Getenv("PG_PW"), Database: "app",
+             Description: "primary Postgres"},
+        },
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer engine.Close(context.Background())
+
+    http.Handle("/flows/", http.StripPrefix("/flows", engine.Handler()))
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}</code></pre>
+  <p>
+    That handler serves the UI, the JSON API and the live run stream. State — flows, runs,
+    checkpoints, bulletins, dead letters — lives in the SQLite file at <code>DataPath</code>.
+  </p>
+  <h3>Or standalone</h3>
+  <p>There is a command for trying it without writing any Go:</p>
+<pre><code>go run github.com/paulmanoni/nifi/cmd/nifi@v0.2.0 -addr :8090 -config connections.json</code></pre>
+</section>
+
+<section id="connections">
+  <h2>Connections</h2>
+  <p>A connection is a database flows read from or write to. There are two ways to have one, and both are listed together.</p>
+  <table>
+    <tr><th></th><th>Declared in code</th><th>Added in the UI</th></tr>
+    <tr><td>Lives in</td><td><code>nifi.Config.Connections</code></td><td>the state file</td></tr>
+    <tr><td>In the UI</td><td>listed, locked</td><td>editable, deletable</td></tr>
+    <tr><td>Credentials</td><td>the host's own config</td><td>the state file</td></tr>
+  </table>
+  <p>
+    <strong>What the host declared always wins.</strong> A stored connection can never take over
+    an id the application believes it owns: the API refuses to write or delete one, and the
+    resolver checks code first. That keeps exactly one meaning per id.
+  </p>
+  <p>
+    <strong>Passwords are write-only.</strong> They are never returned by the API, and an edit
+    that leaves the field empty keeps the stored one rather than blanking it by omission.
+  </p>
+  <div class="note warn">
+    A password added through the UI sits in the state file in plain text. Treat that file as a
+    secret — it already holds run history and dead-lettered rows. Where that is not good enough,
+    declare the connection in code and read its password from wherever your app keeps secrets.
+  </div>
+</section>
+
+<section id="nexus">
+  <h2>Inside a nexus app</h2>
+  <p>
+    A separate module mounts the whole thing as a
+    <a href="https://github.com/paulmanoni/nexus">nexus</a> module, taking its connections from
+    <code>nexus.toml</code>'s <code>[databases.*]</code> blocks:
+  </p>
+<pre><code>go get github.com/paulmanoni/nifi/nexusnifi@v0.1.0</code></pre>
+<pre><code>var Module = nexusnifi.Module(nexusnifi.Config{
+    Path:      "/migrations/flows",
+    Databases: []string{"legacy", "main"},
+    Engine:    nifi.Config{DataPath: "var/nifi.db"},
+    Options:   []nexus.RestOption{auth.Required()},
+    Permissions: map[nifi.Action]string{
+        nifi.ActionEdit: "change_migration",
+        nifi.ActionRun:  "run_migration",
+        nifi.ActionData: "view_migration_data",
+    },
+})</code></pre>
+  <p>
+    It is a module of its own so that nothing depending on the core library pulls nexus in.
+    Use <code>nexusnifi.Routes(cfg)</code> instead to spread the routes into an existing module,
+    so its own path prefix applies.
+  </p>
+</section>
+
+<section id="auth">
+  <h2>Authorization</h2>
+  <p>Four permissions gate everything:</p>
+  <table>
+    <tr><th>Action</th><th>Covers</th></tr>
+    <tr><td><code>ActionView</code></td><td>See flows, runs, progress and bulletins.</td></tr>
+    <tr><td><code>ActionEdit</code></td><td>Create, change, duplicate and delete flows — and stored connections.</td></tr>
+    <tr><td><code>ActionRun</code></td><td>Start, pause, resume and stop runs.</td></tr>
+    <tr><td><code>ActionData</code></td><td>Read database contents: table browsing, previews, connection tests, dead-lettered rows.</td></tr>
+  </table>
+  <p>Hand it your own check, and it never has to know how your app authenticates:</p>
+<pre><code>nifi.Config{
+    Authorize: func(r *http.Request, a nifi.Action) error {
+        u := userFrom(r)
+        if u == nil {
+            return nifi.ErrUnauthenticated       // 401
+        }
+        if !u.Can(string(a)) {
+            return nifi.ErrForbidden             // 403
+        }
+        return nil
+    },
+}</code></pre>
+  <p>
+    Without one, <code>Config.Users</code> gives built-in accounts with per-user actions, and
+    <code>Config.BasicAuth</code> generates an <code>admin</code> password on first start,
+    printed to the console and kept in the state file. Leave all three unset only behind a mount
+    you have already protected.
+  </p>
+</section>
+
+<section id="flows">
+  <h2>Processors</h2>
+  <table>
+    <tr><th>Category</th><th>Processor</th><th>What it does</th></tr>
+    <tr><td>Source</td><td>Database Tables</td><td>Whole tables, or all of them, in parallel resumable chunks.</td></tr>
+    <tr><td>Source</td><td>SQL Query</td><td>A custom SELECT; resumable when given a key column.</td></tr>
+    <tr><td>Source</td><td>Table Changes</td><td>Follows tables as they change; the run stays live.</td></tr>
+    <tr><td>Transform</td><td>Rename Columns / Select-Drop / Rename Tables</td><td>Shape names; keys, indexes and foreign keys follow.</td></tr>
+    <tr><td>Transform</td><td>Compute Columns</td><td>Expressions over the row.</td></tr>
+    <tr><td>Transform</td><td>Convert Types / Map Values / Lookup</td><td>Casts, code→label maps, batched lookups in another table.</td></tr>
+    <tr><td>Route</td><td>Filter / Route</td><td>Conditions to named relationships.</td></tr>
+    <tr><td>Script</td><td>Python Script</td><td><code>def transform(row)</code> → dict, list of dicts, or <code>None</code>.</td></tr>
+    <tr><td>Sink</td><td>PostgreSQL Tables</td><td>COPY / merge / insert, apply changes, create tables, post-load indexes and keys.</td></tr>
+    <tr><td>Sink</td><td>Discard</td><td>Terminates a branch.</td></tr>
+  </table>
+  <p>
+    One source can read many tables and send each down its own path: a connection carries only
+    the tables you name, so <code>users</code> can take one branch and <code>orders</code> another.
+  </p>
+</section>
+
+<section id="expressions">
+  <h2>Expressions</h2>
+  <p>
+    Columns, filters and computed values are written as expressions over the row —
+    <code>lower(trim(email))</code>, <code>concat(first_name, ' ', last_name)</code>,
+    <code>coalesce(x, 0)</code>. The editor lists every function with its arguments and help,
+    including any the host adds.
+  </p>
+  <p>
+    <code>table</code> is the current table's name, so one node can behave differently per table:
+    <code>table == "users" ? upper(name) : name</code>.
+  </p>
+</section>
+
+<section id="scripts">
+  <h2>Scripts</h2>
+  <p>
+    When the GUI steps cannot say it, a <strong>Python Script</strong> node runs Starlark — a
+    Python dialect interpreted in pure Go, sandboxed, with no CGO.
+  </p>
+<pre><code>def transform(row):
+    if not row["email"]:
+        return None                     # drop the row
+    row["domain"] = row["email"].split("@")[-1]
+    return row                          # or a list of dicts, to fan out</code></pre>
+  <p>
+    Set <code>row["_table"]</code> to send a row to a different table. A script that adds or
+    drops rows cannot carry a change feed through it, because it no longer says which row is
+    which — the run says so rather than guessing.
+  </p>
+  <p>Scripts cost about 1.2µs per row against 0.6µs for an expression and 0.05µs for hand-written Go: worth knowing, rarely worth worrying about next to the database.</p>
+</section>
+
+<section id="parameters">
+  <h2>Parameters</h2>
+  <p>
+    Write <code>#{name}</code> in any setting — a target schema, a row filter, a file path — and
+    it is replaced when the flow runs, so one flow serves several environments. Parameters live
+    in the store, or come fixed from <code>nifi.Config.Parameters</code>; a sensitive one is
+    never returned by the API. A flow naming a parameter nobody defined fails validation, saying which.
+  </p>
+</section>
+
+<section id="schedules">
+  <h2>Schedules and folders</h2>
+  <p>
+    A flow can run itself: a cron expression (<code>0 2 * * *</code>) or a shorthand
+    (<code>@hourly</code>, <code>@every 30m</code>). A flow still running when its next time
+    comes round is skipped, so slow runs never pile up, and an instance that was down starts it
+    once on return rather than replaying every missed slot.
+  </p>
+  <p>
+    Flows can depend on other flows, and <em>Run all</em> starts them in dependency order.
+    Folders group the list; every save is kept in a history that can be compared and restored.
+  </p>
+</section>
+
+<section id="running">
+  <h2>What a run does</h2>
+  <p>
+    Rows travel in batches along connections with bounded queues, so a slow destination pushes
+    back on the source rather than filling memory. The run page shows per-node throughput, what
+    each queue is holding, the bulletins, and every row that failed.
+  </p>
+</section>
+
+<section id="safety">
+  <h2>Chunks, resume and dead letters</h2>
+  <ul>
+    <li><strong>Chunking.</strong> A single integer primary key is split into ranges read in parallel. Composite or text keys page with keyset reads. A table with no key streams in one pass, flagged as not resumable.</li>
+    <li><strong>Exactly-once bookkeeping.</strong> Every batch holds a ticket for its chunk; the chunk is checkpointed only after every batch derived from it is committed or deliberately dropped. Resume skips committed chunks.</li>
+    <li><strong>Writes.</strong> <code>merge</code> COPYs into a temporary staging table then runs <code>INSERT … ON CONFLICT DO UPDATE</code>, so a re-applied chunk is harmless. <code>copy</code> is fastest for empty targets and becomes <code>merge_ignore</code> on resume.</li>
+    <li><strong>Bad rows.</strong> The row is found from the COPY error, or by bisecting the batch, then dead-lettered with its reason while the rest commits. <code>MaxErrors</code> stops a run that is failing wholesale.</li>
+    <li><strong>Replay.</strong> Dead letters can be fed back into the node that failed on them, so a fix is checked against the rows that actually broke.</li>
+  </ul>
+</section>
+
+<section id="live">
+  <h2>Following changes</h2>
+  <p>
+    A flow does not have to read its source once and stop. Give it a <strong>Table Changes</strong>
+    source and it keeps going: rows are written as they appear and removed as they are deleted,
+    and the run ends only when you stop it.
+  </p>
+  <p>
+    It needs one column per table that moves whenever a row is written — the <code>updated_at</code>
+    every ORM already maintains. Rows are read in <code>(updated_at, primary key)</code> order, so
+    nothing is missed and nothing is read twice, and the position is remembered against the
+    <em>flow</em>: stop it, deploy, start it again, and it carries on.
+  </p>
+  <p>
+    Turn on the destination's <strong>Apply changes from a feed</strong>. A changed row then
+    overwrites the matching row and a deleted one is removed, in the order the changes arrived.
+    It is a setting beside the write mode, not one of its values, because the two answer
+    different questions: the mode governs the first load, while a change is not a duplicate and
+    always overwrites.
+  </p>
+  <h3>Load it, then follow it — in one run</h3>
+  <p>
+    Put both sources in the same flow. The feed fixes its position before anything runs, then
+    waits until the load has finished before emitting — so the load is not racing the changes
+    that would overtake it, and a row changed <em>while</em> it was loading is still applied.
+  </p>
+  <div class="note">
+    A source that polls cannot see a hard <code>DELETE</code> — the row is simply gone. Soft
+    deletes it can: fill in <strong>A row is deleted when</strong> with an expression such as
+    <code>deleted_at != nil</code>. To follow hard deletes, give the engine a source that reads
+    the database's replication log; see <a href="#extending">Extending</a>.
+  </div>
+</section>
+
+<section id="extending">
+  <h2>A node from a Go function</h2>
+  <p>
+    Writing a <code>Handler</code> by hand means the engine can run your code but knows nothing
+    else about it. <code>nifi.Mapper</code> is the same node declared instead of assembled: the
+    input type says how to read a row, the output type says what the node emits.
+  </p>
+<pre><code>type User struct {
+    ID     int64  `nifi:"id"`
+    Name   string `nifi:"full_name"`
+    Email  *string
+    Secret string `nifi:"-"`      // not written
+}
+
+nifi.Config{Processors: []nifi.Processor{
+    nifi.Mapper[nifi.Row, User]{
+        Type: "app.map_users", Label: "Map users", Icon: "user",
+        PrimaryKey: []string{"id"},
+        Properties: []nifi.Property{{Key: "domain", Label: "Email domain", Kind: "string"}},
+        Open: func(s nifi.Settings) (nifi.MapFunc[nifi.Row, User], func(), error) {
+            domain := s.String("domain")
+            return func(ctx context.Context, in nifi.Row) (*User, error) {
+                name, _ := in["name"].(string)
+                if name == "" {
+                    return nil, nil                 // drop the row
+                }
+                return &User{ID: in["id"].(int64), Name: name}, nil
+            }, nil, nil
+        },
+    }.Processor(),
+}}</code></pre>
+  <ul>
+    <li><strong><code>nil</code> drops a row, an <code>error</code> fails only that row</strong> — it goes to "failure" with the message while the rest of the batch goes on.</li>
+    <li><strong>The output columns come from the type.</strong> Field → column by the <code>nifi</code> tag, else <code>db</code>, else <code>json</code>, else snake_case; <code>-</code> omits; embedded structs flatten; a nil pointer is NULL.</li>
+    <li><strong>The input is <code>nifi.Row</code></strong> (column → value) <strong>or a struct</strong>, filled from the incoming columns by name.</li>
+    <li><strong>Operations follow their own row.</strong> A mapping that drops rows makes position stop meaning identity; the library keeps each output row's insert/update/delete attached to the input row it came from.</li>
+  </ul>
+  <div class="note warn">
+    <strong><code>Open</code> must not touch the world.</strong> It is called whenever the node is
+    built — which includes checking a flow and reading its schema, not only running one. Read
+    settings there and fail on one that cannot work, but put connections and caches behind the
+    first row (a <code>sync.Once</code> inside the returned function), so that pressing
+    <em>Validate</em> changes nothing.
+  </div>
+  <h3>Sources, and streaming ones</h3>
+<pre><code>Sources: []nifi.Source{{
+    Type: "app.binlog", Label: "Replication log", Icon: "radio", Streaming: true,
+    New: func(s nifi.Settings) (nifi.Reader, error) { return &binlogReader{s: s}, nil },
+}}</code></pre>
+  <p>
+    <code>Streaming: true</code> means <code>Read</code> blocks until the run is stopped, and the
+    run is live. Tag each row with what happened to it —
+    <code>batch.Append(row, record.Delete)</code> — and keep your position with
+    <code>s.Remember</code>/<code>s.Recall</code>, which is stored against the flow so the next
+    run continues. Write the position from the batch's <code>record.Ticket</code> callback, so it
+    only moves once those rows are safely written.
+  </p>
+</section>
+
+<section id="schematic">
+  <h2>Declaring a schema</h2>
+  <p>A node that implements <code>Schematic</code> stops being opaque:</p>
+<pre><code>func (h *myHandler) Columns(in []record.Column) ([]record.Column, error)</code></pre>
+  <p>
+    The designer then shows its output without running it, and the schema keeps flowing through
+    it when the sample it is given has no rows — which is exactly when a node that renders from a
+    schema tends to report fewer columns than it really writes. A <code>Mapper</code> implements
+    it already, from its output type.
+  </p>
+</section>
+
+<section id="gormx">
+  <h2>Writing a GORM model</h2>
+  <p>
+    Migrating into tables a GORM application already writes to means matching what <em>it</em>
+    writes, and "every field, as it stands" is not that. GORM applies rules on Create: a zero
+    field takes its <code>default</code> tag, a zero <code>CreatedAt</code>/<code>UpdatedAt</code>
+    becomes now, and a column whose default lives in the database is left out of the statement
+    entirely while every row leaves it zero — so the database applies it per row.
+  </p>
+<pre><code>go get github.com/paulmanoni/nifi/gormx@v0.1.0</code></pre>
+<pre><code>gormx.Mapper(nifi.Mapper[nifi.Row, User]{
+    Type: "app.map_users", Label: "Map users", Map: mapUser,
+}).Processor()</code></pre>
+  <p>
+    It fills in the node's columns, primary key and rendering from the model's own schema, and
+    needs no connection — only the naming strategy, which you pass with <code>gormx.Naming</code>
+    if your app configures one. <code>gormx.Copy()</code> switches to what a bulk COPY that
+    ignores conflicts does instead. <code>gormx.Value</code> renders a single value the same way,
+    for wherever a host computes one itself.
+  </p>
+  <div class="note warn">
+    GORM promotes an embedded struct's fields only when its <strong>type is exported</strong>.
+    Embed an unexported one and its columns — including the primary key — quietly disappear.
+    <code>gormx</code> does the same, because its job is to match GORM.
+  </div>
+</section>
+
+<section id="functions">
+  <h2>Expression functions</h2>
+  <p>The cheapest way to reach code: expose one function, and the rest of the mapping stays on the canvas.</p>
+<pre><code>Functions: []nifi.Function{{
+    Name: "normalizePhone", Args: "value", Help: "+255 form of a local number",
+    Fn: func(a ...any) (any, error) { return phone.Normalize(fmt.Sprint(a[0])), nil },
+}}</code></pre>
+  <p>
+    Arguments arrive as row values and the result goes back as one; an error fails the row, which
+    becomes a dead letter with the message. They are listed in the expression editor beside the
+    built-ins.
+  </p>
+</section>
+
+<section id="seeding">
+  <h2>Seeding flows</h2>
+  <p>
+    Ship flows with the application and have them appear on first start:
+    <code>nifi.Config.SeedFlows</code> takes an <code>fs.FS</code> of one JSON file per flow. A
+    missing flow is created; a flow whose file <code>version</code> is newer than the last one
+    applied is overwritten, and edits made in the UI are kept until that version is raised.
+  </p>
+<pre><code>{"id": "mig_regions", "version": 2, "name": "regions", "folder": "reference",
+ "dependsOn": ["mig_countries"], "graph": {"nodes": [], "edges": []}}</code></pre>
+  <p>
+    <code>Config.BeforeRun</code> and <code>Config.AfterRun</code> bracket every run, with the
+    flow and the run's id — for preparing a target before it loads, and for recording the outcome
+    where the host keeps that.
+  </p>
+</section>
+
+<section id="api">
+  <h2>HTTP API</h2>
+  <p>
+    Everything the UI does is a documented JSON endpoint under the mount path, so the engine can
+    be driven from a script or another service. The full reference — every route, payload and
+    type — is in
+    <a href="https://github.com/paulmanoni/nifi/blob/main/API.md">API.md</a>. A sample:
+  </p>
+  <table>
+    <tr><th>Route</th><th>Does</th></tr>
+    <tr><td><code>GET /api/flows</code></td><td>List flows with their latest run.</td></tr>
+    <tr><td><code>POST /api/flows/:id/runs</code></td><td>Start a run; <code>{resume: true}</code> continues an unfinished one.</td></tr>
+    <tr><td><code>GET /api/runs/:id/events</code></td><td>Server-sent events: progress, bulletins, completion.</td></tr>
+    <tr><td><code>POST /api/flows/preview</code></td><td>Run sample rows through the flow up to a node, writing nothing.</td></tr>
+    <tr><td><code>PUT /api/connections/:id</code></td><td>Create or replace a stored connection.</td></tr>
+    <tr><td><code>GET /api/processors</code></td><td>The processor catalog, including anything the host added.</td></tr>
+  </table>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <p>
+    nifi is released under its repository's licence. Documentation for
+    <a href="https://github.com/paulmanoni/nifi/releases">v0.2.0</a> ·
+    <a href="https://pkg.go.dev/github.com/paulmanoni/nifi">Go reference</a> ·
+    <a href="https://github.com/paulmanoni/nifi/issues">Issues</a>
+  </p>
+</footer>
+
+</body>
+</html>

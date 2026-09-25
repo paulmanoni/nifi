@@ -9,6 +9,8 @@
 > endorsed by or affiliated with it. If you are looking for Apache NiFi, it is
 > at [nifi.apache.org](https://nifi.apache.org).
 
+**Documentation:** <https://paulmanoni.github.io/nifi/>
+
 **Embeddable, UI-first database migration flows for Go apps.** A NiFi-style
 canvas (Svelte + Svelte Flow) and a streaming engine you mount inside an
 existing service to move large databases. It handles **MySQL → PostgreSQL**
