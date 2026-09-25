@@ -2,6 +2,7 @@ package nifi_test
 
 import (
 	"bufio"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -78,4 +79,62 @@ func TestLiveStreamPushesInstanceState(t *testing.T) {
 		t.Fatalf("create flow: %d", cres.StatusCode)
 	}
 	want("flows")
+}
+
+// A client that connects while another is already watching must still get the
+// current state at once. The sweeper only starts for the first watcher, so a
+// snapshot sent from there alone would leave every later client hanging until
+// something happened to change.
+func TestLiveStreamGreetsEveryClient(t *testing.T) {
+	e, err := nifi.New(nifi.Config{DataPath: filepath.Join(t.TempDir(), "n.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close(t.Context())
+	srv := httptest.NewServer(e.Handler())
+	defer srv.Close()
+	// Close the streams before the server: httptest.Server.Close waits for
+	// connections, and an SSE response never ends on its own.
+	ctx, disconnect := context.WithCancel(t.Context())
+	defer disconnect()
+
+	connect := func() <-chan string {
+		req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/live", nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make(chan string, 32)
+		go func() {
+			sc := bufio.NewScanner(res.Body)
+			for sc.Scan() {
+				if name, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+					out <- name
+				}
+			}
+		}()
+		return out
+	}
+
+	first := connect()
+	awaitEvent(t, first, "flows") // the first watcher starts the sweeper
+
+	second := connect()
+	awaitEvent(t, second, "runs")
+	awaitEvent(t, second, "flows")
+}
+
+func awaitEvent(t *testing.T, events <-chan string, name string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-events:
+			if got == name {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no %q event", name)
+		}
+	}
 }

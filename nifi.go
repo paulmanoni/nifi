@@ -41,7 +41,7 @@ import (
 )
 
 // Version of the engine.
-const Version = "0.3.0"
+const Version = "0.3.1"
 
 //go:embed all:ui/dist
 var uiFS embed.FS

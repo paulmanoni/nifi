@@ -32,17 +32,21 @@ type liveEvent struct {
 }
 
 type liveHub struct {
-	mu     sync.Mutex
-	subs   map[chan liveEvent]struct{}
-	stop   chan struct{}
-	dirty  atomic.Bool // a flow changed; re-send the list on the next sweep
-	sweep  func(stop chan struct{})
-	closed bool
+	mu    sync.Mutex
+	subs  map[chan liveEvent]struct{}
+	stop  chan struct{}
+	dirty atomic.Bool // a flow changed; re-send the list on the next sweep
+	sweep func(stop chan struct{})
+	// last is the most recent payload of each event, kept so a client that
+	// arrives mid-stream can be greeted with the current state. The sweeper
+	// only starts for the FIRST watcher, so without this a second client
+	// would sit on an open, silent response until something changed.
+	last map[string][]byte
 }
 
 func (s *Server) hub() *liveHub {
 	s.liveOnce.Do(func() {
-		s.live = &liveHub{subs: map[chan liveEvent]struct{}{}}
+		s.live = &liveHub{subs: map[chan liveEvent]struct{}{}, last: map[string][]byte{}}
 		s.live.sweep = s.sweepLive
 	})
 	return s.live
@@ -52,17 +56,25 @@ func (s *Server) hub() *liveHub {
 // Mutations call it; it is a no-op when nobody is listening.
 func (s *Server) Changed() { s.hub().dirty.Store(true) }
 
-// subscribe joins the stream, starting the sweeper for the first watcher.
-func (h *liveHub) subscribe() (chan liveEvent, func()) {
+// subscribe joins the stream, starting the sweeper for the first watcher. It
+// returns whatever state the hub already holds, so the caller can greet this
+// client before waiting for the next change.
+func (h *liveHub) subscribe() (chan liveEvent, []liveEvent, func()) {
 	ch := make(chan liveEvent, 16)
 	h.mu.Lock()
+	var greeting []liveEvent
+	for _, name := range eventOrder {
+		if b, ok := h.last[name]; ok {
+			greeting = append(greeting, liveEvent{name, b})
+		}
+	}
 	h.subs[ch] = struct{}{}
 	if len(h.subs) == 1 {
 		h.stop = make(chan struct{})
 		go h.sweep(h.stop)
 	}
 	h.mu.Unlock()
-	return ch, func() {
+	return ch, greeting, func() {
 		h.mu.Lock()
 		if _, ok := h.subs[ch]; ok {
 			delete(h.subs, ch)
@@ -76,21 +88,19 @@ func (h *liveHub) subscribe() (chan liveEvent, func()) {
 	}
 }
 
+// eventOrder is the order a client is greeted in: the cheap half first.
+var eventOrder = []string{"runs", "flows"}
+
 func (h *liveHub) publish(name string, data []byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.last[name] = data
 	for ch := range h.subs {
 		select {
 		case ch <- liveEvent{name, data}:
 		default: // slow client: drop, the next sweep supersedes it
 		}
 	}
-}
-
-func (h *liveHub) watching() bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.subs) > 0
 }
 
 // sweepLive is the one place instance state is gathered. It runs only while
@@ -153,8 +163,15 @@ func (s *Server) liveStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	ch, cancel := s.hub().subscribe()
+	ch, greeting, cancel := s.hub().subscribe()
 	defer cancel()
+
+	// Say where things stand before going quiet, whether or not this client
+	// is the one that started the sweeper.
+	for _, e := range greeting {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.name, e.data)
+	}
+	fl.Flush()
 
 	keep := time.NewTicker(15 * time.Second)
 	defer keep.Stop()
