@@ -9,6 +9,9 @@
   import { confirm } from '../lib/stores/confirm.svelte';
   import { auth } from '../lib/stores/auth.svelte';
   import { live } from '../lib/stores/live.svelte';
+  import FolderTreeView from '../lib/flows/FolderTree.svelte';
+  import MoveToFolder from '../lib/flows/MoveToFolder.svelte';
+  import { UNGROUPED, breadcrumb, buildFolderTree, countUngrouped, inScope } from '../lib/flows/folders';
   import { fmtCompact, fmtNum, fmtRelative } from '../lib/format';
   import { latestRuns, waitingFor } from '../lib/flows/status';
   import Skeleton from '../lib/components/Skeleton.svelte';
@@ -35,8 +38,9 @@
     LayoutGrid,
     Clock,
     FolderTree,
-    Folder,
-    FolderOpen,
+    FolderMinus,
+    Layers,
+    ChevronRight,
   } from 'lucide-svelte';
 
   let flows = $state<Flow[] | null>(null);
@@ -142,47 +146,54 @@
         return +new Date(b.updatedAt) - +new Date(a.updatedAt);
       }),
   );
-  let allShownSelected = $derived(filtered.length > 0 && filtered.every((f) => selected.has(f.id)));
 
   // ---------- folders ----------
-  const FOLD_KEY = 'nifi.flowsFolded';
-  let folded = $state(new Set<string>((() => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) ?? '[]'); } catch { return []; } })()));
-  let folderFilter = $state('');
-  let moving = $state(false);
-  let folders = $derived([...new Set((flows ?? []).map((f) => f.folder ?? '').filter(Boolean))].sort());
-  let grouped = $derived.by(() => {
-    const by = new Map<string, Flow[]>();
-    for (const f of filtered) {
-      if (folderFilter && (f.folder ?? '') !== folderFilter) continue;
-      const k = f.folder ?? '';
-      (by.get(k) ?? by.set(k, []).get(k)!).push(f);
-    }
-    return [...by.entries()].sort((a, b) => (a[0] === '' ? 1 : b[0] === '' ? -1 : a[0].localeCompare(b[0])));
-  });
-  function toggleFold(name: string) {
-    const s = new Set(folded);
-    s.has(name) ? s.delete(name) : s.add(name);
-    folded = s;
+  // A folder is only ever the "/"-separated path a flow carries; the tree is
+  // derived from those strings, so there is nothing to create or delete.
+  const OPEN_KEY = 'nifi.folderOpen';
+  const SCOPE_KEY = 'nifi.folderScope';
+  const stored = <T,>(k: string, fallback: T): T => {
     try {
-      localStorage.setItem(FOLD_KEY, JSON.stringify([...s]));
+      const v = localStorage.getItem(k);
+      return v === null ? fallback : (JSON.parse(v) as T);
+    } catch {
+      return fallback;
+    }
+  };
+  let open = $state(new Set<string>(stored<string[]>(OPEN_KEY, [])));
+  let scope = $state(stored<string>(SCOPE_KEY, ''));
+  let moving = $state(false);
+  let showMove = $state(false);
+
+  let tree = $derived(buildFolderTree(flows ?? []));
+  let ungrouped = $derived(countUngrouped(flows ?? []));
+  let trail = $derived(breadcrumb(scope));
+  let scoped = $derived(filtered.filter((f) => inScope(f, scope)));
+  let allShownSelected = $derived(scoped.length > 0 && scoped.every((f) => selected.has(f.id)));
+
+  function pickScope(path: string) {
+    scope = scope === path ? '' : path;
+    try {
+      localStorage.setItem(SCOPE_KEY, JSON.stringify(scope));
     } catch {}
   }
-  function selectFolder(items: Flow[], on: boolean) {
-    const s = new Set(selected);
-    for (const f of items) (on ? s.add(f.id) : s.delete(f.id));
-    selected = s;
+  function toggleOpen(path: string) {
+    const s = new Set(open);
+    s.has(path) ? s.delete(path) : s.add(path);
+    open = s;
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify([...s]));
+    } catch {}
   }
-  async function moveSelected() {
+  async function moveSelected(to: string) {
     if (!selected.size) return;
-    const to = prompt(`Move ${selected.size} flow${selected.size === 1 ? '' : 's'} to which folder?\nLeave empty to ungroup. Use "/" to nest, e.g. migrations/shortlisting.`,
-      (flows ?? []).find((f) => selected.has(f.id))?.folder ?? '');
-    if (to === null) return;
     moving = true;
     try {
-      await api.setFolder([...selected], to.trim());
+      await api.setFolder([...selected], to);
       selected = new Set();
+      showMove = false;
       await poll();
-      toast.success(to.trim() ? `Moved to ${to.trim()}` : 'Ungrouped');
+      toast.success(to ? `Moved to ${to}` : 'Ungrouped');
     } catch (e) {
       toast.error(e);
     } finally {
@@ -196,7 +207,7 @@
     selected = s;
   }
   function toggleAll() {
-    selected = allShownSelected ? new Set() : new Set(filtered.map((f) => f.id));
+    selected = allShownSelected ? new Set() : new Set(scoped.map((f) => f.id));
   }
 
   // ---------- orchestration ----------
@@ -344,12 +355,6 @@
         <Search size={14} />
         <input class="input" placeholder="Filter flows…" bind:value={q} />
       </div>
-      {#if folders.length}
-        <select class="select sortsel" bind:value={folderFilter} aria-label="Filter by folder">
-          <option value="">All folders</option>
-          {#each folders as f}<option value={f}>{f}</option>{/each}
-        </select>
-      {/if}
       <select class="select sortsel" bind:value={sort} aria-label="Sort flows">
         <option value="updated">Recently updated</option>
         <option value="name">Name</option>
@@ -381,7 +386,7 @@
         {#if busy === 'selected'}<LoaderCircle size={14} class="spin" />{:else}<Play size={14} />{/if} Run selected{selected.size ? ` (${selected.size})` : ''}
       </button>
       {#if auth.can.edit}
-        <button class="btn" onclick={moveSelected} disabled={!selected.size || moving} title="Put the selected flows in a folder">
+        <button class="btn" onclick={() => (showMove = true)} disabled={!selected.size || moving} title="Put the selected flows in a folder">
           <FolderTree size={14} /> Move to folder
         </button>
       {/if}
@@ -393,7 +398,47 @@
     </div>
   {/if}
 
-  <div class:card={view !== 'cards' || !flows?.length} class:graphcard={view === 'graph'}>
+  <div class="withtree" class:notree={view === 'graph' || !flows?.length}>
+    {#if view !== 'graph' && flows?.length}
+      <aside class="ftree" aria-label="Folders">
+        <div class="thead">Folders</div>
+        <div class="row all" class:on={scope === ''}>
+          <span class="twist"></span>
+          <button class="pick" onclick={() => pickScope('')}>
+            <Layers size={12} />
+            <span class="nm">All flows</span>
+            <span class="n">{flows?.length ?? 0}</span>
+          </button>
+        </div>
+        <FolderTreeView nodes={tree} {scope} {open} onpick={pickScope} ontoggle={toggleOpen} />
+        {#if ungrouped}
+          <div class="row" class:on={scope === UNGROUPED}>
+            <span class="twist"></span>
+            <button class="pick" onclick={() => pickScope(UNGROUPED)}>
+              <FolderMinus size={12} />
+              <span class="nm">Ungrouped</span>
+              <span class="n">{ungrouped}</span>
+            </button>
+          </div>
+        {/if}
+      </aside>
+    {/if}
+
+  <div class="listpane" class:card={view !== 'cards' || !flows?.length} class:graphcard={view === 'graph'}>
+    {#if trail.length && view !== 'graph'}
+      <nav class="crumbs" aria-label="Folder">
+        <button onclick={() => pickScope('')}>All flows</button>
+        {#each trail as c, i}
+          <ChevronRight size={12} />
+          {#if i === trail.length - 1}
+            <b>{c.name}</b>
+          {:else}
+            <button onclick={() => pickScope(c.path)}>{c.name}</button>
+          {/if}
+        {/each}
+        <span class="muted tiny">{scoped.length} flow{scoped.length === 1 ? '' : 's'}</span>
+      </nav>
+    {/if}
     {#if flows === null}
       <Skeleton rows={6} />
     {:else if flows.length === 0}
@@ -427,31 +472,11 @@
       {#if auth.can.run && filtered.length}
         <label class="selall small muted">
           <input type="checkbox" checked={allShownSelected} indeterminate={!allShownSelected && selected.size > 0} onchange={toggleAll} />
-          Select all {filtered.length}{q ? ' shown' : ''}
+          Select all {scoped.length}{q ? ' shown' : ''}
         </label>
       {/if}
-      {#each grouped as [name, items] (name)}
-        {#if grouped.length > 1 || name}
-          <button class="fhead" onclick={() => toggleFold(name)}>
-            {#if folded.has(name)}<Folder size={14} />{:else}<FolderOpen size={14} />{/if}
-            <b>{name || 'Ungrouped'}</b>
-            <span class="badge">{items.length}</span>
-            {#if auth.can.run && !folded.has(name)}
-              <span
-                class="pick tiny"
-                role="button"
-                tabindex="0"
-                onclick={(e) => (e.stopPropagation(), selectFolder(items, !items.every((f) => selected.has(f.id))))}
-                onkeydown={(e) => e.key === 'Enter' && (e.stopPropagation(), selectFolder(items, true))}
-              >
-                {items.every((f) => selected.has(f.id)) ? 'deselect all' : 'select all'}
-              </span>
-            {/if}
-          </button>
-        {/if}
-        {#if !folded.has(name)}
       <div class="grid">
-        {#each items as f (f.id)}
+        {#each scoped as f (f.id)}
           {@const run = runs.get(f.id)}
           {@const deps = f.dependsOn ?? []}
           <div
@@ -524,12 +549,10 @@
               {/if}
             </div>
           </div>
+        {:else}
+          <div class="card nomatch muted">Nothing here.</div>
         {/each}
       </div>
-        {/if}
-      {:else}
-        <div class="card nomatch muted">No flows match “{q}”.</div>
-      {/each}
     {:else}
       <div class="table-wrap">
       <table class="table">
@@ -550,7 +573,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each filtered as f (f.id)}
+          {#each scoped as f (f.id)}
             {@const run = runs.get(f.id)}
             <tr class="clickable" class:sel={selected.has(f.id)} onclick={() => navigate(`/flows/${f.id}`)}>
               {#if auth.can.run}
@@ -612,7 +635,19 @@
       </div>
     {/if}
   </div>
+  </div>
 </div>
+
+{#if showMove && auth.can.edit}
+  <MoveToFolder
+    flows={flows ?? []}
+    count={selected.size}
+    current={(flows ?? []).find((f) => selected.has(f.id))?.folder ?? ''}
+    busy={moving}
+    onmove={moveSelected}
+    onclose={() => (showMove = false)}
+  />
+{/if}
 
 {#if showNew && auth.can.edit}
   <Modal title="New flow" width="440px" onclose={() => (showNew = false)}>
@@ -640,6 +675,129 @@
 {/if}
 
 <style>
+  /* The folder tree sits beside the list, as a file browser does: it is
+     navigation, so it keeps a fixed column and the data keeps the rest. */
+  .withtree {
+    display: grid;
+    grid-template-columns: 208px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+  .withtree.notree {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .listpane {
+    min-width: 0;
+  }
+  .ftree {
+    position: sticky;
+    top: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-raised, var(--bg-sunken));
+    padding-bottom: 4px;
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+  }
+  .ftree .thead {
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-2);
+    padding: 5px 9px;
+    border-bottom: 1px solid var(--border-strong);
+    background: var(--bg-sunken);
+    position: sticky;
+    top: 0;
+  }
+  /* The "All flows" and "Ungrouped" rows are drawn here rather than in the
+     tree component, because neither is a folder. They must still line up. */
+  .ftree .row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 22px;
+    padding-left: 6px;
+    padding-right: 4px;
+  }
+  .ftree .row.on {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .ftree .row:hover:not(.on) {
+    background: var(--bg-hover);
+  }
+  .ftree .row.all {
+    border-bottom: 1px solid var(--border);
+  }
+  .ftree .twist {
+    width: 14px;
+  }
+  .ftree .pick {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: none;
+    padding: 0 2px;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+  }
+  .ftree .row.on .pick {
+    font-weight: 600;
+  }
+  .ftree .nm {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ftree .n {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+  }
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 0 8px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .crumbs button {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  .crumbs button:hover {
+    text-decoration: underline;
+  }
+  .crumbs b {
+    color: var(--text);
+  }
+  .crumbs .tiny {
+    margin-left: 6px;
+  }
+  @media (max-width: 860px) {
+    .withtree {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .ftree {
+      position: static;
+      max-height: 200px;
+    }
+  }
   .fhead {
     display: flex;
     align-items: center;
