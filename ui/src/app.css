@@ -524,8 +524,8 @@ code,
 }
 
 .page {
-  max-width: 1200px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   padding: 20px 24px 48px;
 }
 .page-head {
