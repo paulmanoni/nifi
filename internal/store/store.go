@@ -13,7 +13,10 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	// glebarez/go-sqlite is the same pure-Go modernc engine, registered once —
+	// importing modernc.org/sqlite directly panics any binary that also links a
+	// glebarez/sqlite-based stack (both register driver "sqlite").
+	_ "github.com/glebarez/go-sqlite"
 
 	"github.com/paulmanoni/nifi/internal/dbx"
 	"github.com/paulmanoni/nifi/internal/model"
