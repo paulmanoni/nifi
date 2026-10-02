@@ -14,14 +14,13 @@
 //	defer eng.Close(context.Background())
 //	http.Handle("/nifi/", eng.Handler())
 //
-// Everything — JSON API, live run stream and the Svelte UI — is served by the
-// one handler. Management state lives in a SQLite file at DataPath.
+// Everything — JSON API, live run stream and the UI — is served by the one
+// handler. Management state lives in a SQLite file at DataPath.
 package nifi
 
 import (
 	"context"
 	"crypto/rand"
-	"embed"
 	"encoding/base64"
 	"fmt"
 	"io/fs"
@@ -42,9 +41,6 @@ import (
 
 // Version of the engine.
 const Version = "0.5.0"
-
-//go:embed all:ui/dist
-var uiFS embed.FS
 
 // Connection is a database the flows may read from or write to. Connections
 // are declared by the host application in Config — the UI lists, tests and
@@ -202,15 +198,6 @@ func New(cfg Config) (*Engine, error) {
 		}
 		return dbx.Connection{}, fmt.Errorf("%w: connection %q is not configured", store.ErrNotFound, id)
 	}
-	ui, err := fs.Sub(uiFS, "ui/dist")
-	if err != nil {
-		return nil, err
-	}
-	devUI := os.Getenv("NIFI_UI_DIR")
-	if devUI != "" {
-		// Serve a local build from disk so UI rebuilds need no Go rebuild.
-		ui = os.DirFS(devUI)
-	}
 	var sessions *api.Sessions
 	if cfg.Authorize == nil && len(cfg.Users) > 0 {
 		sessions = &api.Sessions{Users: map[string]api.User{}, TTL: cfg.SessionTTL, Secure: cfg.SecureCookies}
@@ -277,8 +264,8 @@ func New(cfg Config) (*Engine, error) {
 		fixedParams = append(fixedParams, model.Parameter{Name: p.Name, Value: p.Value,
 			Description: p.Description, Sensitive: p.Sensitive, Fixed: true})
 	}
-	srv := &api.Server{Store: st, Runs: runs, Conns: fixed, Resolve: resolve, UI: ui,
-		Base: cfg.BasePath, Title: cfg.Title, Version: Version, DevUI: devUI != "",
+	srv := &api.Server{Store: st, Runs: runs, Conns: fixed, Resolve: resolve,
+		Base: cfg.BasePath, Title: cfg.Title, Version: Version,
 		Authorize: cfg.Authorize, Actor: cfg.Actor, Sessions: sessions, Basic: basic, Fixed: fixedParams}
 	if err := srv.LoadParameters(context.Background()); err != nil {
 		st.Close()

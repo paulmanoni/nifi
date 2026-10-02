@@ -1,0 +1,700 @@
+package web
+
+import (
+	"net/url"
+	"strings"
+
+	"github.com/paulmanoni/nifi/internal/model"
+	"github.com/paulmanoni/nifi/internal/web/ui/badge"
+	"github.com/paulmanoni/nifi/internal/web/ui/button"
+	"github.com/paulmanoni/nifi/internal/web/ui/icon"
+)
+
+templ flowsPage(c *ctx, v flowsView) {
+	{{ in := v.In }}
+	<div class={ "px-6 pt-5 pb-12", templ.KV("max-w-[1500px]", v.View == "graph") } data-flows-page>
+		@pageHead("Flows") {
+			@count(len(in.Flows))
+			if v.anyActive() {
+				@badge.Badge(badge.Props{Variant: badge.VariantInfo}) {
+					@icon.Icon("loader", "size-3 animate-spin")
+					{ itoa(v.Running) } running
+					if v.Pending > 0 {
+						· { itoa(v.Pending) } pending
+					}
+				}
+			}
+			if c.meta.MaxParallelRuns > 0 {
+				@badge.Badge(badge.Props{Variant: badge.VariantOutline, Attributes: templ.Attributes{"title": "Runs beyond this wait as pending"}}) {
+					max { itoa(c.meta.MaxParallelRuns) } in parallel
+				}
+			}
+			<span class="flex-1"></span>
+			<div class="flex rounded-sm border border-border-strong bg-card p-px" role="tablist" aria-label="View">
+				@seg(v.href(c, "view", ""), "table", "Table", v.View == "table", "data-remember-view=table")
+				@seg(v.href(c, "view", "cards"), "layout-grid", "Cards", v.View == "cards", "data-remember-view=cards")
+				@seg(v.href(c, "view", "graph"), "network", "Graph", v.View == "graph", "data-remember-view=graph")
+			</div>
+			<label class="relative flex w-[220px] items-center">
+				<span class="pointer-events-none absolute left-2 text-muted-foreground">
+					@icon.Icon("search", "size-3.5")
+				</span>
+				<input type="search" data-query value={ v.Q } class={ inputClass, "pl-7" }
+					if v.View == "graph" {
+						placeholder="Highlight flows…"
+					} else {
+						placeholder="Filter flows…"
+					}
+				/>
+			</label>
+			if v.View != "graph" {
+				<select data-param="sort" aria-label="Sort flows" class={ selectClass }>
+					<option value="updated" selected?={ v.Sort == "updated" }>Recently updated</option>
+					<option value="name" selected?={ v.Sort == "name" }>Name</option>
+					<option value="status" selected?={ v.Sort == "status" }>Run status</option>
+				</select>
+			}
+			if c.can("edit") {
+				@button.Button(button.Props{Variant: button.VariantOutline, Href: c.href("/migrate")}) {
+					@icon.Icon("database-zap")
+					Migrate a database
+				}
+				@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-open": "nf-new-flow"}}) {
+					@icon.Icon("plus")
+					New flow
+				}
+			}
+		}
+		if c.can("run") && len(in.Flows) > 0 {
+			@orchestration(c, v)
+		}
+		if len(in.Flows) == 0 {
+			<div class="rounded-sm border bg-card">
+				if c.can("edit") {
+					<div class="flex flex-col items-center gap-2 p-10 text-center text-muted-foreground">
+						@icon.Icon("workflow", "size-8")
+						<h3 class="text-[15px] font-semibold text-foreground">No flows yet</h3>
+						<p class="text-[12.5px]">Draw a flow from scratch, or let the wizard build a whole-database migration for you.</p>
+						<div class="mt-2 flex gap-2">
+							@button.Button(button.Props{Variant: button.VariantOutline, Href: c.href("/migrate")}) {
+								@icon.Icon("database-zap")
+								Migrate a database
+							}
+							@button.Button(button.Props{Attributes: templ.Attributes{"data-open": "nf-new-flow"}}) {
+								@icon.Icon("plus")
+								New flow
+							}
+						</div>
+					</div>
+				} else {
+					@emptyState("workflow", "No flows yet", "Nobody has created a flow yet, and your account can't create one.", "", "")
+				}
+			</div>
+		} else if v.View == "graph" {
+			@graphView(c, v)
+		} else {
+			<div class="grid grid-cols-1 items-start gap-3 min-[860px]:grid-cols-[208px_minmax(0,1fr)]">
+				@folderSidebar(c, v)
+				<div class="min-w-0">
+					if crumbs := breadcrumb(v.Folder); len(crumbs) > 0 {
+						<nav class="mb-2 flex flex-wrap items-center gap-1 text-[12px] text-secondary-foreground" aria-label="Folder">
+							<a href={ templ.SafeURL(v.href(c, "folder", "")) }>All flows</a>
+							for i, cr := range crumbs {
+								@icon.Icon("chevron-right", "size-3")
+								if i == len(crumbs)-1 {
+									<b class="text-foreground">{ cr.Name }</b>
+								} else {
+									<a href={ templ.SafeURL(v.href(c, "folder", cr.Path)) }>{ cr.Name }</a>
+								}
+							}
+							<span class="ml-1.5 text-[11px] text-muted-foreground">{ plural(len(v.Shown), "flow", "flows") }</span>
+						</nav>
+					}
+					if v.View == "cards" {
+						@cardsView(c, v)
+					} else {
+						@tableView(c, v)
+					}
+				</div>
+			</div>
+		}
+	</div>
+	if c.can("edit") {
+		@newFlowDialog(c)
+		@moveDialog(c, v)
+	}
+}
+
+// seg is one button of a segmented control (a link: views are URLs).
+templ seg(href, ic, label string, on bool, attr string) {
+	<a
+		href={ templ.SafeURL(href) }
+		role="tab"
+		aria-selected={ boolAttr(on) }
+		{ attrPair(attr)... }
+		class={ "inline-flex h-[24px] items-center gap-1.5 rounded-[1px] px-2.5 text-[12px] font-medium no-underline hover:no-underline",
+			templ.KV("bg-accent-soft text-accent-text", on),
+			templ.KV("text-secondary-foreground hover:bg-muted", !on) }
+	>
+		@icon.Icon(ic, "size-3.5")
+		{ label }
+	</a>
+}
+
+templ orchestration(c *ctx, v flowsView) {
+	<div class="mb-3 flex flex-wrap items-center gap-2 rounded-sm border bg-card px-2.5 py-2">
+		<div class="relative flex">
+			@button.Button(button.Props{Class: "rounded-r-none", Attributes: templ.Attributes{
+				"data-post": c.api("/runs/all"), "data-body": runAllBody(false), "data-result": "runall",
+				"title": "Start every flow in dependency order",
+			}}) {
+				@icon.Icon("play")
+				Run all
+			}
+			<details class="relative" data-menu>
+				<summary class="inline-flex h-7 cursor-pointer list-none items-center rounded-r-sm border border-l-white/30 border-primary bg-primary px-1.5 text-primary-foreground hover:bg-primary/90" aria-label="More run options">
+					@icon.Icon("chevron-down")
+				</summary>
+				<div class="absolute top-[calc(100%+4px)] left-[-90px] z-50 min-w-[260px] rounded-sm border border-border-strong bg-card p-1 shadow-lg" role="menu">
+					<button type="button" role="menuitem" class={ menuItem } data-post={ c.api("/runs/all") } data-body={ runAllBody(false) } data-result="runall">
+						@icon.Icon("play", "size-3.5")
+						Run all <span class="text-[11px] text-muted-foreground">fresh runs</span>
+					</button>
+					<button type="button" role="menuitem" class={ menuItem } data-post={ c.api("/runs/all") } data-body={ runAllBody(true) } data-result="runall">
+						@icon.Icon("rotate-ccw", "size-3.5")
+						Resume unfinished <span class="text-[11px] text-muted-foreground">skip committed chunks</span>
+					</button>
+				</div>
+			</details>
+		</div>
+		@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{
+			"data-post": c.api("/runs/all"), "data-selection": "flowIds", "data-body": runAllBody(false), "data-result": "runall",
+			"data-needs-selection": "", "data-label": "Run selected",
+		}}) {
+			@icon.Icon("play")
+			<span data-selection-label>Run selected</span>
+		}
+		if c.can("edit") {
+			@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{
+				"data-open": "nf-move", "data-needs-selection": "", "title": "Put the selected flows in a folder",
+			}}) {
+				@icon.Icon("folder-tree")
+				Move to folder
+			}
+		}
+		@button.Button(button.Props{Variant: button.VariantDestructive, Disabled: !v.anyActive(), Attributes: templ.Attributes{
+			"data-post": c.api("/runs/stop-all"), "data-body": `{"flowIds":[]}`, "data-result": "stopall",
+			"data-confirm-title": "Stop all runs",
+			"data-confirm":       "Stop every running, paused and pending run (" + itoa(len(v.In.Active)) + ")? Committed chunks are kept; stopped runs can be resumed.",
+			"data-confirm-label": "Stop all", "data-danger": "",
+		}}) {
+			@icon.Icon("square", "size-3")
+			Stop all
+		}
+		<span class="flex-1"></span>
+		<span class="text-[12px] text-muted-foreground">Runs start in dependency order; dependents wait until their prerequisites complete.</span>
+	</div>
+}
+
+const menuItem = "flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12.5px] text-foreground hover:bg-muted"
+
+templ folderSidebar(c *ctx, v flowsView) {
+	<aside class="sticky top-0 max-h-[calc(100vh-160px)] overflow-y-auto rounded-sm border bg-sunken pb-1 max-[859px]:static max-[859px]:max-h-[200px]" aria-label="Folders">
+		<div class="sticky top-0 border-b border-border-strong bg-sunken px-2.5 py-1.5 text-[10.5px] font-semibold tracking-[0.05em] text-secondary-foreground uppercase">Folders</div>
+		<div class="border-b">
+			@folderRow(v.pick(c, ""), "layers", "All flows", len(v.In.Flows), v.Folder == "", false, 0, "")
+		</div>
+		@folderTree(c, v, v.Tree, 0)
+		if v.Ungrouped > 0 {
+			@folderRow(v.pick(c, ungrouped), "folder-minus", "Ungrouped", v.Ungrouped, v.Folder == ungrouped, false, 0, "")
+		}
+	</aside>
+}
+
+templ folderTree(c *ctx, v flowsView, nodes []*folderNode, depth int) {
+	for _, n := range nodes {
+		if len(n.Children) > 0 {
+			<details data-folder={ n.Path } open?={ within(v.Folder, n.Path) && v.Folder != n.Path || strings.HasPrefix(v.Folder, n.Path+"/") }>
+				<summary class="list-none [&::-webkit-details-marker]:hidden">
+					@folderRow(v.pick(c, n.Path), folderIcon(v, n), n.Name, n.Total, v.Folder == n.Path, strings.HasPrefix(v.Folder, n.Path+"/"), depth, n.Path)
+				</summary>
+				@folderTree(c, v, n.Children, depth+1)
+			</details>
+		} else {
+			@folderRow(v.pick(c, n.Path), folderIcon(v, n), n.Name, n.Total, v.Folder == n.Path, false, depth, n.Path)
+		}
+	}
+}
+
+func folderIcon(v flowsView, n *folderNode) string {
+	if v.Folder == n.Path || strings.HasPrefix(v.Folder, n.Path+"/") {
+		return "folder-open"
+	}
+	return "folder"
+}
+
+// folderRow is one line of the tree. A folder with children toggles open
+// from its chevron (the <summary>); its name picks it.
+templ folderRow(href, ic, name string, total int, on, under bool, depth int, path string) {
+	<div
+		class={ "flex h-[22px] items-center gap-0.5 pr-1",
+			templ.KV("bg-accent-soft shadow-[inset_2px_0_0_var(--nf-accent)]", on),
+			templ.KV("bg-accent-soft/40", under && !on),
+			templ.KV("hover:bg-muted", !on) }
+		style={ "padding-left: " + itoa(6+depth*13) + "px" }
+		title={ path }
+	>
+		if path != "" {
+			<span class="inline-flex w-3.5 justify-center text-muted-foreground [details>summary_&]:cursor-pointer" data-twist>
+				<span class="hidden [details>summary_&]:inline [details[open]>summary_&]:rotate-90">
+					@icon.Icon("chevron-right", "size-3")
+				</span>
+			</span>
+		} else {
+			<span class="w-3.5"></span>
+		}
+		<a href={ templ.SafeURL(href) } class={ "flex min-w-0 flex-1 items-center gap-1.5 px-0.5 text-[11.5px] text-foreground no-underline hover:no-underline", templ.KV("font-semibold", on) }>
+			@icon.Icon(ic, "size-3 shrink-0")
+			<span class="truncate">{ name }</span>
+			<span class="ml-auto font-mono text-[10px] text-muted-foreground tabular-nums">{ itoa(total) }</span>
+		</a>
+	</div>
+}
+
+templ graphView(c *ctx, v flowsView) {
+	<div class="flex h-[calc(100vh-230px)] min-h-[420px] flex-col overflow-hidden rounded-sm border bg-card">
+		<div id="nf-depgraph" class="min-h-0 flex-1" data-island="depgraph" data-props={ jsonAttr(v.graphProps(c)) } data-keep-island></div>
+	</div>
+	<div class="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+		@legend("border border-border-strong bg-card", "never run")
+		@legend("bg-warn", "pending")
+		@legend("bg-primary", "running")
+		@legend("bg-ok", "completed")
+		@legend("bg-err", "failed")
+		@legend("bg-secondary-foreground", "stopped")
+		<span>arrows point from prerequisite → dependent · click a flow to open it</span>
+	</div>
+}
+
+templ legend(swatch, label string) {
+	<span class="inline-flex items-center gap-1.5"><i class={ "inline-block size-[9px] rounded-[1px]", swatch }></i>{ label }</span>
+}
+
+// selectAll is the tri-state header checkbox over the shown flows.
+templ selectAll(v flowsView, label string) {
+	<input type="checkbox" data-select-all aria-label="Select all" class="accent-[var(--nf-accent)]"/>
+	if label != "" {
+		<span>{ label }</span>
+	}
+}
+
+templ cardsView(c *ctx, v flowsView) {
+	if c.can("run") && len(v.Shown) > 0 {
+		<label class="mb-2 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+			@selectAll(v, "Select all "+itoa(len(v.Shown))+shownSuffix(v.Q))
+		</label>
+	}
+	<div class="grid grid-cols-[repeat(auto-fill,minmax(290px,1fr))] gap-3" data-selectable>
+		for i := range v.Shown {
+			@flowCard(c, v, &v.Shown[i])
+		}
+		if len(v.Shown) == 0 {
+			<div class="rounded-sm border bg-card p-6 text-center text-muted-foreground">Nothing here.</div>
+		}
+	</div>
+}
+
+func shownSuffix(q string) string {
+	if q != "" {
+		return " shown"
+	}
+	return ""
+}
+
+templ flowCard(c *ctx, v flowsView, f *model.Flow) {
+	{{ r := v.In.run(f.ID) }}
+	<div class={ "group flex flex-col gap-2 rounded-sm border border-l-[3px] bg-card p-3 hover:shadow-sm has-[[data-select]:checked]:bg-accent-soft/50", statusBorder(r) } data-href={ c.href("/flows/" + url.PathEscape(f.ID)) } data-row={ f.ID } data-folder={ f.Folder }>
+		<div class="flex items-center gap-1.5">
+			if c.can("run") {
+				<input type="checkbox" data-select value={ f.ID } aria-label={ "Select " + f.Name } class="accent-[var(--nf-accent)]"/>
+			}
+			<a href={ templ.SafeURL(c.href("/flows/" + url.PathEscape(f.ID))) } class="truncate text-[13px] font-semibold text-foreground" title={ f.Name }>{ f.Name }</a>
+			<span class="flex-1"></span>
+			<div class="flex items-center opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+				@flowActions(c, v, f, r)
+			</div>
+			if c.can("run") {
+				@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Disabled: r != nil && isActive(r.Status), Attributes: templ.Attributes{
+					"title": "Run this flow (waits for its prerequisites)", "data-post": c.api("/runs/all"), "data-body": runAllBody(false, f.ID), "data-result": "runall",
+				}}) {
+					@icon.Icon("play")
+				}
+			}
+		</div>
+		if f.Description != "" {
+			<p class="line-clamp-2 text-[12px] text-secondary-foreground" title={ f.Description }>{ f.Description }</p>
+		}
+		@runCell(c, v, f, r)
+		<div class="grid grid-cols-3 border-y py-1.5 text-[12px]">
+			<div><div class="text-[10.5px] text-muted-foreground uppercase">Written</div><b class="tabular-nums" title={ runNum(r, "written") }>{ runCompact(r, "written") }</b></div>
+			<div><div class="text-[10.5px] text-muted-foreground uppercase">Failed</div><b class={ "tabular-nums", templ.KV("text-err", r != nil && r.RowsFailed > 0) }>{ runCompact(r, "failed") }</b></div>
+			<div>
+				<div class="text-[10.5px] text-muted-foreground uppercase">Updated</div>
+				<b class="font-semibold">
+					@ago(f.UpdatedAt)
+				</b>
+			</div>
+		</div>
+		if f.Schedule != "" {
+			@scheduleLine(f, false)
+		}
+		<div class="flex flex-wrap items-center gap-1 text-[11.5px]">
+			if len(f.DependsOn) > 0 {
+				<span class="text-muted-foreground">Depends on</span>
+				for i, d := range f.DependsOn {
+					if i < 4 {
+						@depChip(c, v, d)
+					}
+				}
+				if len(f.DependsOn) > 4 {
+					<span class="rounded-full border px-1.5 leading-[18px] text-muted-foreground" title={ depNames(v, f.DependsOn[4:]) }>+{ itoa(len(f.DependsOn) - 4) }</span>
+				}
+			} else {
+				<span class="text-muted-foreground">No dependencies</span>
+			}
+		</div>
+	</div>
+}
+
+templ tableView(c *ctx, v flowsView) {
+	<div class="overflow-x-auto rounded-sm border bg-card">
+		<table class="w-full min-w-[900px] text-[12.5px]" data-selectable>
+			<thead>
+				<tr class="border-b bg-muted/60 text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+					if c.can("run") {
+						<th class="w-8 px-3 py-2">
+							@selectAll(v, "")
+						</th>
+					}
+					<th class="w-[26%] px-3 py-2">Name</th>
+					<th class="px-3 py-2">Folder</th>
+					<th class="px-3 py-2">Schedule</th>
+					<th class="px-3 py-2">Depends on</th>
+					<th class="px-3 py-2">Latest run</th>
+					<th class="px-3 py-2 text-right">Written</th>
+					<th class="px-3 py-2 text-right">Failed</th>
+					<th class="px-3 py-2">Updated</th>
+					<th class="w-px px-3 py-2"></th>
+				</tr>
+			</thead>
+			<tbody>
+				for i := range v.Shown {
+					{{ f := &v.Shown[i] }}
+					{{ r := v.In.run(f.ID) }}
+					<tr class="cursor-pointer border-b last:border-0 even:bg-muted/30 hover:bg-muted has-[[data-select]:checked]:bg-accent-soft/60" data-href={ c.href("/flows/" + url.PathEscape(f.ID)) } data-row={ f.ID } data-folder={ f.Folder }>
+						if c.can("run") {
+							<td class="px-3 py-1.5">
+								<input type="checkbox" data-select value={ f.ID } aria-label={ "Select " + f.Name } class="accent-[var(--nf-accent)]"/>
+							</td>
+						}
+						<td class="max-w-0 px-3 py-1.5">
+							<a href={ templ.SafeURL(c.href("/flows/" + url.PathEscape(f.ID))) } class="block truncate font-semibold text-foreground" title={ f.Name }>{ f.Name }</a>
+							if f.Description != "" {
+								<div class="truncate text-[11.5px] text-muted-foreground">{ f.Description }</div>
+							}
+						</td>
+						<td class="px-3 py-1.5 text-muted-foreground">
+							if f.Folder != "" {
+								{ f.Folder }
+							} else {
+								—
+							}
+						</td>
+						<td class="px-3 py-1.5 whitespace-nowrap">
+							if f.Schedule != "" {
+								@scheduleLine(f, true)
+							} else {
+								<span class="text-muted-foreground">—</span>
+							}
+						</td>
+						<td class="px-3 py-1.5">
+							if len(f.DependsOn) > 0 {
+								<div class="flex max-w-[240px] flex-wrap gap-1">
+									for _, d := range f.DependsOn {
+										@depChip(c, v, d)
+									}
+								</div>
+							} else {
+								<span class="text-muted-foreground">—</span>
+							}
+						</td>
+						<td class="px-3 py-1.5">
+							@runCell(c, v, f, r)
+						</td>
+						<td class="px-3 py-1.5 text-right tabular-nums" title={ runNum(r, "written") }>{ runCompact(r, "written") }</td>
+						<td class={ "px-3 py-1.5 text-right tabular-nums", templ.KV("text-err", r != nil && r.RowsFailed > 0) }>{ runCompact(r, "failed") }</td>
+						<td class="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+							@ago(f.UpdatedAt)
+						</td>
+						<td class="px-3 py-1.5">
+							<div class="flex items-center">
+								@flowActions(c, v, f, r)
+							</div>
+						</td>
+					</tr>
+				}
+				if len(v.Shown) == 0 {
+					<tr>
+						<td colspan="10" class="px-3 py-6 text-center text-muted-foreground">
+							if v.Q != "" {
+								No flows match “{ v.Q }”.
+							} else {
+								Nothing here.
+							}
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+templ flowActions(c *ctx, v flowsView, f *model.Flow, r *model.RunSummary) {
+	if r != nil {
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Href: c.href("/runs/" + url.PathEscape(r.ID)), Attributes: templ.Attributes{"title": "Latest run"}}) {
+			@icon.Icon("history")
+		}
+	}
+	if c.can("edit") {
+		@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Attributes: templ.Attributes{
+			"title": "Duplicate", "data-post": c.api("/flows/" + url.PathEscape(f.ID) + "/duplicate"), "data-success": "Duplicated as “{name}”",
+		}}) {
+			@icon.Icon("copy")
+		}
+		if deps := v.In.dependents(f.ID); len(deps) > 0 {
+			@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Class: "hover:text-err", Attributes: templ.Attributes{
+				"title": "Delete", "data-refuse": deleteBlockedMessage(*f, deps),
+			}}) {
+				@icon.Icon("trash")
+			}
+		} else {
+			@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Class: "hover:text-err", Attributes: templ.Attributes{
+				"title": "Delete", "data-post": c.api("/flows/" + url.PathEscape(f.ID)), "data-method": "DELETE",
+				"data-confirm-title": "Delete flow",
+				"data-confirm":       "Delete “" + f.Name + "”? Its run history, bulletins and dead letters are removed too. This cannot be undone.",
+				"data-confirm-label": "Delete", "data-danger": "",
+				"data-success": "Flow deleted", "data-error-prefix": "Can't delete “" + f.Name + "”: ",
+			}}) {
+				@icon.Icon("trash")
+			}
+		}
+	}
+}
+
+// runCell is a flow's latest run: its status, a line about it, and a
+// progress bar while it runs.
+templ runCell(c *ctx, v flowsView, f *model.Flow, r *model.RunSummary) {
+	{{ sub := v.runSub(f, r) }}
+	<div class="flex min-w-0 flex-col gap-1">
+		<div class="flex min-w-0 items-center gap-1.5">
+			if r != nil {
+				<a href={ templ.SafeURL(c.href("/runs/" + url.PathEscape(r.ID))) } title="Open run" class="no-underline hover:no-underline">
+					@statusPill(r, true)
+				</a>
+			} else {
+				@statusPill(nil, true)
+			}
+			if r != nil {
+				if r.Status == model.RunCompleted {
+					<span class="text-[11.5px] text-muted-foreground">
+						if r.FinishedAt != nil {
+							@ago(*r.FinishedAt)
+						} else {
+							@ago(r.StartedAt)
+						}
+					</span>
+				} else if sub.Text != "" {
+					<span class={ "truncate text-[11.5px]", templ.KV("text-err", sub.Err), templ.KV("text-muted-foreground", !sub.Err) } title={ sub.Title }>{ sub.Text }</span>
+				} else {
+					<span class="text-[11.5px] text-muted-foreground">
+						@ago(r.StartedAt)
+					</span>
+				}
+			}
+		</div>
+		if r != nil && isActive(r.Status) && r.Status != model.RunPending {
+			{{ est := v.Estimates[r.ID] }}
+			<div class="max-w-[260px]" title={ fmtNum(r.RowsWritten) + " rows written" }>
+				if r.Live || est == 0 {
+					<div class="h-1.5 overflow-hidden rounded-full bg-sunken"><div class="nf-indeterminate h-full w-[8%] rounded-full bg-primary"></div></div>
+				} else {
+					@progressBar(pct(r.RowsWritten, est), "")
+				}
+			</div>
+		}
+	</div>
+}
+
+templ scheduleLine(f *model.Flow, compact bool) {
+	<span
+		class={ "inline-flex items-center gap-1 text-[11.5px]", templ.KV("text-accent-text", f.ScheduleEnabled), templ.KV("text-muted-foreground", !f.ScheduleEnabled) }
+		title={ scheduleTitle(f) }
+	>
+		@icon.Icon("clock", "size-3")
+		<span class="font-mono">{ f.Schedule }</span>
+		if !compact {
+			if f.ScheduleEnabled && f.NextRun != nil {
+				<span class="text-muted-foreground">
+					· next
+					@ago(*f.NextRun)
+				</span>
+			} else if !f.ScheduleEnabled {
+				<span class="text-muted-foreground">· off</span>
+			}
+		}
+	</span>
+	if compact {
+		if f.ScheduleEnabled && f.NextRun != nil {
+			<div class="text-[11px] text-muted-foreground">
+				next
+				@ago(*f.NextRun)
+			</div>
+		} else if !f.ScheduleEnabled {
+			<div class="text-[11px] text-muted-foreground">off</div>
+		}
+	}
+}
+
+func scheduleTitle(f *model.Flow) string {
+	if !f.ScheduleEnabled {
+		return "Schedule off: " + f.Schedule
+	}
+	t := "Runs on " + f.Schedule
+	if f.NextRun != nil {
+		t += " · next " + stamp(*f.NextRun)
+	}
+	return t
+}
+
+templ depChip(c *ctx, v flowsView, id string) {
+	{{ dep := v.In.flow(id) }}
+	{{ r := v.In.run(id) }}
+	<a
+		href={ templ.SafeURL(c.href("/flows/" + url.PathEscape(id))) }
+		class={ "inline-flex h-5 max-w-[200px] items-center gap-1 truncate rounded-full border bg-card px-1.5 text-[11.5px] text-foreground no-underline hover:no-underline", chipTone(r) }
+		title={ depTitle(dep, id, r) }
+	>
+		@icon.Icon("link", "size-2.5 shrink-0")
+		<span class="truncate">
+			if dep != nil {
+				{ dep.Name }
+			} else {
+				{ id }
+			}
+		</span>
+	</a>
+}
+
+func depTitle(dep *model.Flow, id string, r *model.RunSummary) string {
+	if dep == nil {
+		return id
+	}
+	return dep.Name + " — " + runStatusText(r)
+}
+
+func depNames(v flowsView, ids []string) string {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = id
+		if f := v.In.flow(id); f != nil {
+			names[i] = f.Name
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func runCompact(r *model.RunSummary, which string) string {
+	if r == nil {
+		return "—"
+	}
+	if which == "failed" {
+		return fmtCompact(r.RowsFailed)
+	}
+	return fmtCompact(r.RowsWritten)
+}
+
+func runNum(r *model.RunSummary, which string) string {
+	if r == nil {
+		return ""
+	}
+	if which == "failed" {
+		return fmtNum(r.RowsFailed)
+	}
+	return fmtNum(r.RowsWritten)
+}
+
+templ newFlowDialog(c *ctx) {
+	@dialog("nf-new-flow", "New flow", "440px") {
+		<form data-json data-action={ c.api("/flows") } data-method="POST" data-then={ c.href("/flows/{id}") } data-extra={ `{"graph":{"nodes":[],"edges":[]}}` } class="flex flex-col">
+			<div class="flex flex-col gap-3 p-4">
+				<label class="flex flex-col gap-1">
+					<span>
+						@fieldLabel("Name")
+						<span class="text-err">*</span>
+					</span>
+					<input name="name" required autofocus placeholder="e.g. Orders MySQL → Postgres" class={ inputClass } data-trim/>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Description")
+					<textarea name="description" rows="3" class={ textareaClass } data-trim></textarea>
+				</label>
+			</div>
+			<footer class="flex items-center gap-2 border-t px-4 py-2.5">
+				<span class="flex-1"></span>
+				@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-close": ""}}) {
+					Cancel
+				}
+				@button.Button(button.Props{Type: button.TypeSubmit}) {
+					Create
+				}
+			</footer>
+		</form>
+	}
+}
+
+templ moveDialog(c *ctx, v flowsView) {
+	@dialog("nf-move", "Move flows", "460px") {
+		<form data-json data-action={ c.api("/flows/folder") } data-method="POST" data-selection="ids" data-success="Moved to {folder}" data-success-empty="Ungrouped" data-move class="flex flex-col">
+			<div class="flex flex-col gap-3 p-4">
+				<p class="text-[12px] text-muted-foreground">A folder is just the path a flow carries, so moving the last flow out of one removes it. Use <code class="font-mono">/</code> to nest.</p>
+				<div class="max-h-[240px] overflow-y-auto rounded-sm border">
+					<label class="flex cursor-pointer items-center gap-2 border-b px-2.5 py-1.5 text-[12.5px] last:border-0 hover:bg-muted has-[:checked]:bg-accent-soft">
+						<input type="radio" name="pick" value="" class="accent-[var(--nf-accent)]"/>
+						Ungrouped <span class="text-muted-foreground">no folder</span>
+					</label>
+					for _, p := range folderPaths(v.In.Flows) {
+						<label class="flex cursor-pointer items-center gap-2 border-b px-2.5 py-1.5 font-mono text-[12px] last:border-0 hover:bg-muted has-[:checked]:bg-accent-soft">
+							<input type="radio" name="pick" value={ p } class="accent-[var(--nf-accent)]"/>
+							{ p }
+						</label>
+					}
+				</div>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Or a new folder")
+					<input name="fresh" placeholder="e.g. migrations/archive" class={ inputClass, "font-mono" }/>
+				</label>
+				<input type="hidden" name="folder" value=""/>
+			</div>
+			<footer class="flex items-center gap-2 border-t px-4 py-2.5">
+				<span class="text-[12px] text-muted-foreground" data-move-target>Removing from any folder</span>
+				<span class="flex-1"></span>
+				@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-close": ""}}) {
+					Cancel
+				}
+				@button.Button(button.Props{Type: button.TypeSubmit}) {
+					Move
+				}
+			</footer>
+		</form>
+	}
+}

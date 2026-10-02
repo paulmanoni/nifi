@@ -1,0 +1,353 @@
+package web
+
+import (
+	"net/url"
+	"strings"
+
+	"github.com/paulmanoni/nifi/internal/web/ui/badge"
+	"github.com/paulmanoni/nifi/internal/web/ui/button"
+	"github.com/paulmanoni/nifi/internal/web/ui/icon"
+)
+
+templ connectionsPage(c *ctx, conns []conn, err error) {
+	<div class="px-6 pt-5 pb-12">
+		@pageHead("Connections") {
+			@count(len(conns))
+			<span class="flex-1"></span>
+			<span class="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
+				@icon.Icon("code", "size-3.5")
+				Declared in code, or added here
+			</span>
+			if c.can("edit") {
+				@button.Button(button.Props{Attributes: templ.Attributes{"data-open": "nf-conn-new"}}) {
+					@icon.Icon("plus")
+					New connection
+				}
+			}
+		}
+		if err != nil {
+			<div class="rounded-sm border bg-card">
+				@emptyState("alert-triangle", "Could not load connections", err.Error(), "", "")
+			</div>
+		} else if len(conns) == 0 {
+			<div class="flex flex-col items-center gap-2 rounded-sm border bg-card p-10 text-center">
+				@icon.Icon("plug", "size-8 text-muted-foreground")
+				<h3 class="text-[15px] font-semibold">No connections yet</h3>
+				<p class="max-w-[620px] text-[12.5px] text-secondary-foreground">A connection can be declared in Go by the application that embeds this engine — credentials then stay in the host's own config — or added here, in which case it is kept in the state file. Either way the password never reaches the browser.</p>
+				if c.can("edit") {
+					@button.Button(button.Props{Class: "mt-1", Attributes: templ.Attributes{"data-open": "nf-conn-new"}}) {
+						@icon.Icon("plus")
+						New connection
+					}
+				}
+				<p class="mt-3 text-[12px] text-muted-foreground">In code:</p>
+				<pre class="max-w-full overflow-x-auto rounded-sm bg-sunken p-3 text-left font-mono text-[11.5px]">{ connSnippet }</pre>
+			</div>
+		} else {
+			<div class="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
+				for _, cn := range conns {
+					@connCard(c, cn)
+				}
+			</div>
+		}
+	</div>
+	if c.can("edit") {
+		@connDialog(c, conn{Driver: "postgres", Host: "localhost", Port: 5432}, true)
+		for _, cn := range conns {
+			if cn.Managed {
+				@connDialog(c, cn, false)
+			}
+		}
+	}
+}
+
+templ connCard(c *ctx, cn conn) {
+	<div class="flex flex-col gap-2.5 rounded-sm border bg-card p-3.5">
+		<div class="flex items-start gap-2.5">
+			<span class={ "inline-flex size-8 flex-none items-center justify-center rounded-sm", driverTone(cn.Driver) }>
+				@icon.Icon("database", "size-4")
+			</span>
+			<div class="min-w-0 flex-1">
+				<div class="truncate text-[14px] font-semibold">{ cn.label() }</div>
+				<div class="font-mono text-[10.5px] text-muted-foreground">id: { cn.ID }</div>
+			</div>
+			if cn.Driver == "mysql" {
+				@badge.Badge(badge.Props{Variant: badge.VariantWarn}) {
+					mysql
+				}
+			} else {
+				@badge.Badge(badge.Props{Variant: badge.VariantInfo}) {
+					{ cn.Driver }
+				}
+			}
+			if !cn.Managed {
+				<span class="text-muted-foreground" title="Declared by the application in code — change it where that is configured">
+					@icon.Icon("lock", "size-3.5")
+				</span>
+			}
+		</div>
+		<div class="truncate font-mono text-[12px]" title={ cn.endpoint() }>{ cn.endpoint() }</div>
+		if cn.Description != "" {
+			<p class="text-[12px] text-secondary-foreground">{ cn.Description }</p>
+		}
+		<div data-test-result={ cn.ID } data-keep class="hidden rounded-sm border px-2.5 py-1.5 text-[12px]"></div>
+		<div class="flex items-center gap-1.5">
+			if c.can("data") {
+				@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-test-conn": cn.ID, "data-url": c.api("/connections/test")}}) {
+					@icon.Icon("zap")
+					Test
+				}
+				@button.Button(button.Props{Variant: button.VariantOutline, Href: c.href("/connections/" + url.PathEscape(cn.ID) + "/tables")}) {
+					@icon.Icon("table")
+					Browse tables
+				}
+			}
+			if cn.Managed && c.can("edit") {
+				<span class="flex-1"></span>
+				@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Attributes: templ.Attributes{"title": "Edit", "data-open": "nf-conn-" + cn.ID}}) {
+					@icon.Icon("pencil")
+				}
+				@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Class: "hover:text-err", Attributes: templ.Attributes{
+					"title": "Delete", "data-post": c.api("/connections/" + url.PathEscape(cn.ID)), "data-method": "DELETE",
+					"data-confirm-title": "Delete " + cn.label(),
+					"data-confirm":       "Flows still pointing at “" + cn.ID + "” will fail on their next run, saying the connection is not configured.",
+					"data-confirm-label": "Delete", "data-danger": "",
+				}}) {
+					@icon.Icon("trash")
+				}
+			}
+		</div>
+	</div>
+}
+
+func driverTone(driver string) string {
+	if driver == "mysql" {
+		return "bg-warn-soft text-warn"
+	}
+	return "bg-accent-soft text-accent-text"
+}
+
+// connDialog adds (fresh) or edits a managed connection.
+templ connDialog(c *ctx, cn conn, fresh bool) {
+	{{ id := "nf-conn-" + cn.ID }}
+	{{ title := "Edit " + cn.label() }}
+	if fresh {
+		{{ id = "nf-conn-new" }}
+		{{ title = "New connection" }}
+	}
+	@dialog(id, title, "560px") {
+		<form data-json data-method="PUT" data-action={ c.api("/connections/{id}") } data-success="Connection {id} saved" class="flex min-h-0 flex-col" data-conn-form>
+			<div class="grid grid-cols-2 gap-3 overflow-y-auto p-4">
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Id")
+					if fresh {
+						<input name="id" required placeholder="warehouse" class={ inputClass, "font-mono" } data-trim autofocus/>
+						<span class="text-[11px] text-muted-foreground">What flows refer to. It cannot be changed later.</span>
+					} else {
+						<input name="id" value={ cn.ID } readonly class={ inputClass, "font-mono opacity-70" }/>
+						<span class="text-[11px] text-muted-foreground">Fixed once created.</span>
+					}
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Name")
+					<input name="name" value={ cn.Name } placeholder="Warehouse" class={ inputClass } data-trim/>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Driver")
+					<select name="driver" class={ selectClass } data-driver>
+						<option value="postgres" selected?={ cn.Driver != "mysql" }>PostgreSQL</option>
+						<option value="mysql" selected?={ cn.Driver == "mysql" }>MySQL</option>
+					</select>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Database")
+					<input name="database" value={ cn.Database } required placeholder="app" class={ inputClass, "font-mono" } data-trim/>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Host")
+					<input name="host" value={ cn.Host } required class={ inputClass } data-trim/>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Port")
+					<input name="port" type="number" value={ itoa(portOr(cn)) } class={ inputClass } data-type="number" data-port/>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("User")
+					<input name="user" value={ cn.User } autocomplete="off" class={ inputClass }/>
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Password")
+					<input name="password" type="password" autocomplete="new-password" class={ inputClass }
+						if !fresh {
+							placeholder="unchanged"
+						}
+					/>
+					<span class="text-[11px] text-muted-foreground">Stored on the server and never sent back to the browser.</span>
+				</label>
+				<label class="col-span-2 flex flex-col gap-1">
+					@fieldLabel("Description")
+					<input name="description" value={ cn.Description } placeholder="what this database is for" class={ inputClass }/>
+				</label>
+				<div data-form-error class="col-span-2 hidden rounded-sm border px-2.5 py-1.5 text-[12px] data-[kind=error]:border-err/30 data-[kind=error]:bg-err-soft data-[kind=error]:text-err data-[kind=ok]:border-ok/30 data-[kind=ok]:bg-ok-soft data-[kind=ok]:text-ok"></div>
+			</div>
+			<footer class="flex items-center gap-2 border-t px-4 py-2.5">
+				@button.Button(button.Props{Variant: button.VariantOutline, Type: button.TypeSubmit, Attributes: templ.Attributes{"data-then": "test"}}) {
+					@icon.Icon("zap")
+					Save and test
+				}
+				<span class="flex-1"></span>
+				@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-close": ""}}) {
+					Cancel
+				}
+				@button.Button(button.Props{Type: button.TypeSubmit}) {
+					Save
+				}
+			</footer>
+		</form>
+	}
+}
+
+func portOr(cn conn) int {
+	if cn.Port != 0 {
+		return cn.Port
+	}
+	return defaultPort(cn.Driver)
+}
+
+templ tablesPage(c *ctx, v tablesView) {
+	<div class="flex h-full flex-col px-6 pt-5 pb-6">
+		<div class="mb-3 flex flex-wrap items-center gap-2.5">
+			@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Href: c.href("/connections"), Attributes: templ.Attributes{"title": "Connections"}}) {
+				@icon.Icon("arrow-left", "size-4")
+			}
+			<h1 class="text-[16px] font-semibold">{ v.Conn.label() } <span class="font-normal text-muted-foreground">· { v.Conn.Database }</span></h1>
+		</div>
+		<div class="grid min-h-0 flex-1 grid-cols-[280px_1fr] overflow-hidden rounded-sm border bg-card max-[760px]:grid-cols-1">
+			<aside class="flex min-h-0 flex-col border-r">
+				<div class="flex flex-col gap-1.5 border-b p-2.5">
+					<label class="relative flex items-center">
+						<span class="pointer-events-none absolute left-2 text-muted-foreground">
+							@icon.Icon("search", "size-3.5")
+						</span>
+						<input type="search" data-query value={ v.Q } placeholder={ "Filter " + itoa(len(v.Tables)) + " tables…" } class={ inputClass, "pl-7" }/>
+					</label>
+					<span class="text-[11px] text-muted-foreground">~{ fmtCompact(v.Rows) } rows · { fmtBytes(v.Bytes) }</span>
+				</div>
+				<div class="min-h-0 flex-1 overflow-y-auto py-1">
+					if v.ListErr != nil {
+						<p class="px-3 py-2 text-[12px] text-err">{ v.ListErr.Error() }</p>
+					} else if len(v.Shown) == 0 {
+						<p class="px-3 py-2 text-[12px] text-muted-foreground">No tables</p>
+					}
+					for _, t := range v.Shown {
+						{{ ref := tableRef(t, v.Conn.Driver) }}
+						<a
+							href={ templ.SafeURL(v.href(c, ref)) }
+							class={ "flex items-center gap-1.5 px-3 py-1 text-[12px] text-foreground no-underline hover:bg-muted hover:no-underline",
+								templ.KV("bg-accent-soft font-semibold", ref == v.Table) }
+						>
+							<span class="min-w-0 flex-1 truncate font-mono">{ ref }</span>
+							if !t.HasPrimaryKey {
+								<span class="text-warn" title="No primary key">
+									@icon.Icon("alert-triangle", "size-3")
+								</span>
+							}
+							<span class="font-mono text-[10.5px] text-muted-foreground">{ fmtCompact(t.EstimatedRows) }</span>
+						</a>
+					}
+				</div>
+			</aside>
+			<section class="min-h-0 overflow-y-auto p-4">
+				if v.Table == "" {
+					<p class="pt-10 text-center text-muted-foreground">Select a table to inspect its columns, keys and indexes.</p>
+				} else if v.MetaErr != nil {
+					<p class="text-err">{ v.MetaErr.Error() }</p>
+				} else if m := v.Meta; m != nil {
+					<div class="mb-3 flex flex-wrap items-center gap-2">
+						<h3 class="font-mono text-[14px] font-semibold">{ qualified(m.Schema, m.Name) }</h3>
+						@badge.Badge(badge.Props{Variant: badge.VariantOutline}) {
+							~{ fmtNum(m.EstimatedRows) } rows
+						}
+						if len(m.PrimaryKey) > 0 {
+							@badge.Badge(badge.Props{Variant: badge.VariantInfo}) {
+								@icon.Icon("key", "size-3")
+								{ strings.Join(m.PrimaryKey, ", ") }
+							}
+						} else {
+							@badge.Badge(badge.Props{Variant: badge.VariantWarn}) {
+								no primary key
+							}
+						}
+					</div>
+					<table class="w-full text-[12px]">
+						<thead>
+							<tr class="border-b bg-muted/60 text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+								<th class="px-2.5 py-1.5">Column</th>
+								<th class="px-2.5 py-1.5">Type</th>
+								<th class="px-2.5 py-1.5">Native</th>
+								<th class="px-2.5 py-1.5">Null</th>
+								<th class="px-2.5 py-1.5">Default</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, col := range m.Columns {
+								<tr class="border-b last:border-0">
+									<td class="px-2.5 py-1 font-mono">
+										if inKey(col.Name, m.PrimaryKey) {
+											<span class="text-accent-text">
+												@icon.Icon("key", "mr-1 inline size-3")
+											</span>
+										}
+										{ col.Name }
+									</td>
+									<td class="px-2.5 py-1">
+										@badge.Badge(badge.Props{Variant: badge.VariantOutline}) {
+											{ columnType(col) }
+										}
+									</td>
+									<td class="px-2.5 py-1 font-mono text-muted-foreground">{ col.NativeType }</td>
+									<td class="px-2.5 py-1">
+										if col.Nullable {
+											yes
+										} else {
+											no
+										}
+									</td>
+									<td class="max-w-[160px] truncate px-2.5 py-1 font-mono" title={ col.Default }>{ col.Default }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+					if len(m.Indexes) > 0 {
+						<h4 class="mt-4 mb-1.5 text-[12.5px] font-semibold">Indexes</h4>
+						<div class="flex flex-col gap-1 text-[12px]">
+							for _, ix := range m.Indexes {
+								<div class="flex items-center gap-2">
+									<span class="font-mono">{ ix.Name }</span>
+									<span class="font-mono text-muted-foreground">({ strings.Join(ix.Columns, ", ") })</span>
+									if ix.Unique {
+										@badge.Badge(badge.Props{Variant: badge.VariantInfo}) {
+											unique
+										}
+									}
+								</div>
+							}
+						</div>
+					}
+					if len(m.ForeignKeys) > 0 {
+						<h4 class="mt-4 mb-1.5 text-[12.5px] font-semibold">Foreign keys</h4>
+						<div class="flex flex-col gap-1 text-[12px]">
+							for _, fk := range m.ForeignKeys {
+								<div class="flex flex-wrap items-center gap-2">
+									<span class="font-mono">{ fk.Name }</span>
+									<span class="font-mono text-muted-foreground">({ strings.Join(fk.Columns, ", ") }) → { fk.RefTable }({ strings.Join(fk.RefColumns, ", ") })</span>
+									<span class="text-[11px] text-muted-foreground">ON DELETE { fk.OnDelete } ON UPDATE { fk.OnUpdate }</span>
+								</div>
+							}
+						</div>
+					}
+				}
+			</section>
+		</div>
+	</div>
+}

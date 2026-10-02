@@ -1,0 +1,192 @@
+package web
+
+import (
+	"net/http"
+	"net/url"
+	"sort"
+	"strings"
+
+	"github.com/paulmanoni/nifi/internal/model"
+	"github.com/paulmanoni/nifi/internal/web/ui/button"
+	"github.com/paulmanoni/nifi/internal/web/ui/icon"
+)
+
+func parametersRoute(c *ctx) (page, int) {
+	var params []model.Parameter
+	err := c.get("/parameters", &params)
+	q := strings.TrimSpace(c.r.URL.Query().Get("q"))
+	sort.Slice(params, func(i, j int) bool { return params[i].Name < params[j].Name })
+	var shown []model.Parameter
+	for _, p := range params {
+		if matches(q, p.Name, p.Description) {
+			shown = append(shown, p)
+		}
+	}
+	return page{Nav: "parameters", Title: "Parameters", Live: "instance", Body: parametersPage(c, params, shown, q, err)}, http.StatusOK
+}
+
+templ parametersPage(c *ctx, all, shown []model.Parameter, q string, err error) {
+	<div class="px-6 pt-5 pb-12">
+		@pageHead("Parameters") {
+			@count(len(all))
+			<span class="flex-1"></span>
+			<label class="relative flex w-[220px] items-center">
+				<span class="pointer-events-none absolute left-2 text-muted-foreground">
+					@icon.Icon("search", "size-3.5")
+				</span>
+				<input type="search" data-query value={ q } placeholder="Filter parameters…" class={ inputClass, "pl-7" }/>
+			</label>
+			if c.can("edit") {
+				@button.Button(button.Props{Attributes: templ.Attributes{"data-open": "nf-param-new"}}) {
+					@icon.Icon("plus")
+					New parameter
+				}
+			}
+		}
+		<p class="mb-3.5 max-w-[70ch] text-[12.5px] text-secondary-foreground">A parameter fills in a node's settings, so the same flow runs against different environments. Write <code>{ "#{name}" }</code> in any setting — a target schema, a row filter, a file path — and it is replaced when the flow runs.</p>
+		<div class="overflow-x-auto rounded-sm border bg-card">
+			if err != nil {
+				@emptyState("alert-triangle", "Could not load parameters", err.Error(), "", "")
+			} else if len(all) == 0 {
+				<div class="flex flex-col items-center gap-2 p-10 text-center">
+					@icon.Icon("sliders", "size-8 text-muted-foreground")
+					<h3 class="text-[15px] font-semibold">No parameters yet</h3>
+					<p class="text-[12.5px] text-secondary-foreground">Add one, then refer to it in a node's settings as <code>{ "#{name}" }</code>.</p>
+					if c.can("edit") {
+						@button.Button(button.Props{Class: "mt-1", Attributes: templ.Attributes{"data-open": "nf-param-new"}}) {
+							@icon.Icon("plus")
+							New parameter
+						}
+					}
+				</div>
+			} else {
+				<table class="w-full min-w-[720px] text-[12.5px]">
+					<thead>
+						<tr class="border-b bg-muted/60 text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+							<th class="px-3 py-2">Name</th>
+							<th class="px-3 py-2">Value</th>
+							<th class="px-3 py-2">Description</th>
+							<th class="px-3 py-2">Updated</th>
+							<th class="w-px px-3 py-2"></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range shown {
+							<tr class="border-b last:border-0 even:bg-muted/30">
+								<td class="px-3 py-1.5 whitespace-nowrap">
+									<span class="font-mono">{ "#{" + p.Name + "}" }</span>
+									if p.Fixed {
+										<span class="ml-1.5 rounded-sm border px-1 text-[10.5px] text-muted-foreground" title="Set by the application; edit it where the application is configured">fixed</span>
+									}
+								</td>
+								<td class="max-w-[320px] truncate px-3 py-1.5 font-mono" title={ paramValueTitle(p) }>
+									if p.Sensitive {
+										<span class="text-muted-foreground italic">🔒 hidden</span>
+									} else if p.Value == "" {
+										<span class="text-muted-foreground">—</span>
+									} else {
+										{ p.Value }
+									}
+								</td>
+								<td class="px-3 py-1.5 text-secondary-foreground">
+									if p.Description != "" {
+										{ p.Description }
+									} else {
+										—
+									}
+								</td>
+								<td class="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+									@ago(p.UpdatedAt)
+								</td>
+								<td class="px-3 py-1.5">
+									if c.can("edit") && !p.Fixed {
+										<div class="flex items-center">
+											@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Attributes: templ.Attributes{"title": "Edit", "data-open": "nf-param-" + p.Name}}) {
+												@icon.Icon("pencil")
+											}
+											@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Class: "hover:text-err", Attributes: templ.Attributes{
+												"title": "Delete", "data-post": c.api("/parameters/" + url.PathEscape(p.Name)), "data-method": "DELETE",
+												"data-confirm-title": "Delete parameter",
+												"data-confirm":       "Delete #{" + p.Name + "}? Flows that use it stop validating until it is defined again.",
+												"data-confirm-label": "Delete", "data-danger": "",
+											}}) {
+												@icon.Icon("trash")
+											}
+										</div>
+									}
+								</td>
+							</tr>
+						}
+						if len(shown) == 0 {
+							<tr><td colspan="5" class="px-3 py-6 text-center text-muted-foreground">No parameter matches “{ q }”.</td></tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	</div>
+	if c.can("edit") {
+		@paramDialog(c, model.Parameter{}, true)
+		for _, p := range all {
+			if !p.Fixed {
+				@paramDialog(c, p, false)
+			}
+		}
+	}
+}
+
+func paramValueTitle(p model.Parameter) string {
+	if p.Sensitive {
+		return ""
+	}
+	return p.Value
+}
+
+templ paramDialog(c *ctx, p model.Parameter, fresh bool) {
+	{{ id := "nf-param-" + p.Name }}
+	{{ title := "Edit #{" + p.Name + "}" }}
+	if fresh {
+		{{ id = "nf-param-new" }}
+		{{ title = "New parameter" }}
+	}
+	@dialog(id, title, "480px") {
+		<form data-json data-method="PUT" data-action={ c.api("/parameters/{name}") } data-success="#{{name}} saved" class="flex flex-col">
+			<div class="flex flex-col gap-3 p-4">
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Name")
+					if fresh {
+						<input name="name" required placeholder="schema" autofocus class={ inputClass, "font-mono" } data-trim/>
+					} else {
+						<input name="name" value={ p.Name } readonly class={ inputClass, "font-mono opacity-70" }/>
+					}
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Value")
+					if p.Sensitive {
+						<input name="value" placeholder="new value" class={ inputClass, "font-mono" }/>
+					} else {
+						<input name="value" value={ p.Value } placeholder="value" class={ inputClass, "font-mono" }/>
+					}
+				</label>
+				<label class="flex flex-col gap-1">
+					@fieldLabel("Description")
+					<input name="description" value={ p.Description } placeholder="what it is for" class={ inputClass }/>
+				</label>
+				<label class="inline-flex items-center gap-2 text-[12.5px]">
+					<input type="checkbox" name="sensitive" checked?={ p.Sensitive } class="accent-[var(--nf-accent)]"/>
+					Sensitive <span class="text-muted-foreground">— kept out of every response</span>
+				</label>
+				<div data-form-error class="hidden rounded-sm border border-err/30 bg-err-soft px-2.5 py-1.5 text-[12px] text-err"></div>
+			</div>
+			<footer class="flex items-center gap-2 border-t px-4 py-2.5">
+				<span class="flex-1"></span>
+				@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-close": ""}}) {
+					Cancel
+				}
+				@button.Button(button.Props{Type: button.TypeSubmit}) {
+					Save
+				}
+			</footer>
+		</form>
+	}
+}

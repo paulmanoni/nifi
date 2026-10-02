@@ -1,0 +1,382 @@
+package web
+
+import (
+	"time"
+
+	"github.com/paulmanoni/nifi/internal/model"
+	"github.com/paulmanoni/nifi/internal/web/ui/button"
+	"github.com/paulmanoni/nifi/internal/web/ui/icon"
+)
+
+// themeBoot sets the theme before first paint: the saved choice, else the
+// OS preference ("system").
+const themeBoot = `(function(){try{var t=localStorage.getItem('nifi.theme');if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme='light'}})()`
+
+templ document(c *ctx, p page) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ p.Title } · { c.title() }</title>
+			@templ.Raw("<script>" + themeBoot + ";window.__NIFI__=" + jsonAttr(map[string]string{"base": c.base, "title": c.title()}) + "</script>")
+			<link rel="icon" type="image/svg+xml" href={ c.asset("favicon.svg") }/>
+			<link rel="stylesheet" href={ c.asset("nifi.css") }/>
+			<script src={ c.asset("nifi.js") } defer></script>
+		</head>
+		<body class="flex h-dvh flex-col overflow-hidden bg-background text-foreground antialiased" data-live={ p.Live } data-islands={ c.asset("islands/islands.js") }>
+			@topBar(c, p)
+			<div id="nf-status">
+				if p.Nav != "" && c.can("view") {
+					@statusBar(c)
+				}
+			</div>
+			@mainArea(p)
+			<div id="nf-toasts" class="pointer-events-none fixed right-4 bottom-4 z-[200] flex w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-2"></div>
+			@confirmDialog()
+		</body>
+	</html>
+}
+
+// partial is a live refresh: the regions nifi.js morphs into the page.
+templ partial(c *ctx, p page) {
+	<div id="nf-status">
+		@statusBar(c)
+	</div>
+	@mainArea(p)
+}
+
+templ mainArea(p page) {
+	<main
+		id="nf-main"
+		data-title={ p.Title }
+		if p.Full {
+			data-static
+			class="relative min-h-0 flex-1 overflow-hidden"
+		} else {
+			class="relative min-h-0 flex-1 overflow-auto"
+		}
+	>
+		@p.Body
+	</main>
+}
+
+func (c *ctx) title() string {
+	if c.meta != nil && c.meta.Title != "" {
+		return c.meta.Title
+	}
+	return "Data Flows"
+}
+
+templ logo(size string) {
+	<svg viewBox="0 0 32 32" width={ size } height={ size } aria-hidden="true">
+		<rect width="32" height="32" rx="7" fill="var(--nf-accent)"></rect>
+		<circle cx="9" cy="10" r="3.2" fill="#fff"></circle>
+		<circle cx="9" cy="22" r="3.2" fill="#fff"></circle>
+		<circle cx="23" cy="16" r="3.6" fill="#fff"></circle>
+		<path d="M11.5 11.5 20 15M11.5 20.5 20 17" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"></path>
+	</svg>
+}
+
+templ topBar(c *ctx, p page) {
+	<nav class="flex h-[38px] flex-none items-center gap-1 border-b border-black bg-chrome px-3">
+		<a href={ templ.SafeURL(c.href("/flows")) } class="mr-[18px] flex items-center gap-2 text-[13px] font-semibold tracking-[0.01em] text-chrome-text no-underline hover:no-underline">
+			@logo("20")
+			<span>{ c.title() }</span>
+		</a>
+		if p.Nav != "" {
+			<div class="flex h-full min-w-0 items-stretch overflow-x-auto [scrollbar-width:none]">
+				@navLink(c.href("/flows"), "workflow", "Flows", p.Nav == "flows")
+				@navLink(c.href("/connections"), "plug", "Connections", p.Nav == "connections")
+				@navLink(c.href("/parameters"), "sliders", "Parameters", p.Nav == "parameters")
+			</div>
+		}
+		<span class="flex-1"></span>
+		if c.meta != nil && c.meta.Version != "" {
+			<span class="mr-1.5 text-[11px] text-chrome-text-2">v{ c.meta.Version }</span>
+		}
+		if c.meta != nil && c.meta.User != "" && c.meta.Auth != "none" {
+			if c.meta.Auth == "builtin" {
+				<details class="relative" data-menu>
+					<summary class="mr-1 flex h-6 cursor-pointer list-none items-center gap-1.5 rounded-sm bg-chrome-2 px-2.5 text-[11.5px] font-medium text-chrome-text-2 hover:text-chrome-text">
+						@icon.Icon("user", "size-3.5")
+						{ c.meta.User }
+						@icon.Icon("chevron-down", "size-3")
+					</summary>
+					<div class="absolute top-[calc(100%+4px)] right-0 z-50 min-w-[180px] rounded-sm border border-border-strong bg-card p-1 shadow-lg">
+						<div class="mb-1 border-b px-2 pt-1.5 pb-2 text-[12px] text-muted-foreground">Signed in as <strong class="text-foreground">{ c.meta.User }</strong></div>
+						<button type="button" data-logout class="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12.5px] text-foreground hover:bg-muted">
+							@icon.Icon("log-out", "size-3.5")
+							Sign out
+						</button>
+					</div>
+				</details>
+			} else {
+				<span class="mr-1 inline-flex h-6 items-center gap-1.5 rounded-sm bg-chrome-2 px-2.5 text-[11.5px] font-medium text-chrome-text-2" title={ "Signed in as " + c.meta.User }>
+					@icon.Icon("user", "size-3.5")
+					{ c.meta.User }
+				</span>
+			}
+		}
+		<button type="button" data-theme-toggle title="Toggle theme" class="inline-flex size-7 cursor-pointer items-center justify-center rounded-sm text-chrome-text-2 hover:bg-chrome-2 hover:text-chrome-text">
+			<span class="dark:hidden">
+				@icon.Icon("moon")
+			</span>
+			<span class="hidden dark:inline">
+				@icon.Icon("sun")
+			</span>
+		</button>
+	</nav>
+}
+
+templ navLink(href, ic, label string, on bool) {
+	<a
+		href={ templ.SafeURL(href) }
+		class={ "inline-flex items-center gap-1.5 border-b-2 px-3 text-[12.5px] font-medium whitespace-nowrap no-underline hover:no-underline",
+			templ.KV("border-primary text-white", on),
+			templ.KV("border-transparent text-chrome-text-2 hover:bg-chrome-2 hover:text-chrome-text", !on) }
+	>
+		@icon.Icon(ic)
+		{ label }
+	</a>
+}
+
+// statusBar is how every flow stands, from the same state /api/live pushes.
+templ statusBar(c *ctx) {
+	{{ in := c.instance() }}
+	{{ t := in.tally() }}
+	<div class="flex h-7 flex-none items-center gap-3.5 overflow-x-auto border-b bg-sunken px-3 text-[11.5px] whitespace-nowrap text-muted-foreground [scrollbar-width:none]">
+		@statusItem("workflow", itoa(t.Flows), "Flows", "")
+		<span class="h-3.5 w-px bg-border"></span>
+		@statusItem("play", itoa(t.Running), "Running", onClass(t.Running > 0, "text-running"))
+		if t.Live > 0 {
+			@statusItem("radio", itoa(t.Live), "Following their source — these end only when stopped", "text-primary")
+		}
+		@statusItem("check-circle", itoa(t.Completed), "Completed", onClass(t.Completed > 0, "text-ok"))
+		@statusItem("x-circle", itoa(t.Failed), "Failed", onClass(t.Failed > 0, "text-err"))
+		@statusItem("square", itoa(t.Stopped), "Stopped", "")
+		@statusItem("circle", itoa(t.NeverRun), "Never run", "opacity-70")
+		<span class="h-3.5 w-px bg-border"></span>
+		@statusItem("rows", fmtCompact(t.RowsWritten), "Rows written across every flow's latest run", "")
+		@statusItem("alert-triangle", fmtCompact(t.RowsFailed), "Rows that failed and were kept as dead letters", onClass(t.RowsFailed > 0, "text-err"))
+		<span class="flex-1"></span>
+		<span data-live-state class="inline-flex items-center gap-1.5">
+			<span class="size-1.5 rounded-full bg-ok" data-live-dot></span>
+			<span data-live-label>live</span>
+		</span>
+		if in.Err != nil {
+			<span class="font-semibold text-err" title={ in.Err.Error() }>disconnected</span>
+		}
+	</div>
+}
+
+func onClass(on bool, class string) string {
+	if on {
+		return class
+	}
+	return ""
+}
+
+templ statusItem(ic, n, title, class string) {
+	<span class={ "inline-flex items-center gap-1.5", class } title={ title }>
+		@icon.Icon(ic, "size-3")
+		<b class="font-semibold tabular-nums">{ n }</b>
+	</span>
+}
+
+// ---- gates ----
+
+templ gate(c *ctx, ic, title, msg string) {
+	<div class="flex h-full flex-col items-center justify-center gap-2.5 p-6 text-center text-muted-foreground">
+		@icon.Icon(ic, "size-[30px]")
+		<h2 class="text-[16px] font-semibold text-foreground">{ title }</h2>
+		<p class="max-w-[420px] text-secondary-foreground">{ msg }</p>
+		@button.Button(button.Props{Href: c.r.URL.RequestURI()}) {
+			Retry
+		}
+	</div>
+}
+
+templ loginPage(c *ctx) {
+	<div class="flex h-full items-center justify-center p-6">
+		<form data-login class="flex w-[340px] flex-col gap-3 rounded-sm border bg-card p-6 shadow-sm">
+			<div class="flex flex-col items-center gap-2 pb-2 text-center">
+				@logo("34")
+				<h1 class="text-[17px] font-semibold">{ c.title() }</h1>
+				<p class="text-[12.5px] text-muted-foreground">Sign in to continue</p>
+			</div>
+			<label class="flex flex-col gap-1">
+				@fieldLabel("Username")
+				<input name="username" autocomplete="username" autofocus required class={ inputClass }/>
+			</label>
+			<label class="flex flex-col gap-1">
+				@fieldLabel("Password")
+				<input name="password" type="password" autocomplete="current-password" required class={ inputClass }/>
+			</label>
+			<div data-form-error role="alert" class="hidden rounded-sm border border-err/30 bg-err-soft px-2.5 py-1.5 text-[12px] text-err"></div>
+			@button.Button(button.Props{Type: button.TypeSubmit, FullWidth: true, Size: button.SizeLg}) {
+				Sign in
+			}
+		</form>
+	</div>
+}
+
+// ---- shared pieces ----
+
+templ emptyState(ic, title, msg, href, linkText string) {
+	<div class="flex h-full min-h-60 flex-col items-center justify-center gap-2 p-8 text-center text-muted-foreground">
+		@icon.Icon(ic, "size-8")
+		<h3 class="text-[15px] font-semibold text-foreground">{ title }</h3>
+		if msg != "" {
+			<p class="max-w-md text-[12.5px]">{ msg }</p>
+		}
+		if href != "" {
+			<a href={ templ.SafeURL(href) } class="text-[12.5px]">{ linkText }</a>
+		}
+	</div>
+}
+
+const inputClass = "h-7 w-full rounded-sm border border-input bg-card px-2 text-[12.5px] outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-60"
+
+const textareaClass = "w-full rounded-sm border border-input bg-card p-2 text-[12.5px] leading-4 outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40"
+
+const selectClass = "h-7 rounded-sm border border-input bg-card px-1.5 text-[12.5px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40"
+
+templ fieldLabel(label string) {
+	<span class="text-[11.5px] font-semibold text-secondary-foreground">{ label }</span>
+}
+
+// pageHead is a page's title row: name, badges, then tools on the right.
+templ pageHead(title string) {
+	<div class="mb-3.5 flex flex-wrap items-center gap-2">
+		<h1 class="text-[17px] font-semibold">{ title }</h1>
+		{ children... }
+	</div>
+}
+
+templ count(n int) {
+	<span class="rounded-sm border bg-card px-1.5 text-[11px] font-semibold text-muted-foreground tabular-nums">{ itoa(n) }</span>
+}
+
+// statusPill is a run's status, in nifi's colours.
+templ statusPill(r *model.RunSummary, sm bool) {
+	if r == nil {
+		<span class={ pillBase(sm), "border-border bg-muted text-muted-foreground normal-case" }>never run</span>
+	} else {
+		<span class={ pillBase(sm), pillClass(r.Status) } if r.Live { title="Follows its source; ends only when stopped" }>
+			if r.Status == model.RunRunning {
+				<span class="size-1.5 animate-pulse rounded-full bg-current"></span>
+			}
+			if r.Live && r.Status == model.RunRunning {
+				live
+			} else {
+				{ string(r.Status) }
+			}
+		</span>
+	}
+}
+
+func pillBase(sm bool) string {
+	if sm {
+		return "inline-flex items-center gap-1 rounded-full border px-1.5 text-[10.5px] leading-[16px] font-semibold capitalize whitespace-nowrap"
+	}
+	return "inline-flex items-center gap-1.5 rounded-full border px-2 text-[11.5px] leading-[20px] font-semibold capitalize whitespace-nowrap"
+}
+
+func pillClass(s model.RunStatus) string {
+	switch s {
+	case model.RunRunning:
+		return "border-primary/40 bg-accent-soft text-accent-text"
+	case model.RunPaused, model.RunStopping:
+		return "border-warn/40 bg-warn-soft text-warn"
+	case model.RunCompleted:
+		return "border-ok/40 bg-ok-soft text-ok"
+	case model.RunFailed:
+		return "border-err/40 bg-err-soft text-err"
+	}
+	return "border-border bg-muted text-muted-foreground"
+}
+
+// ago is a moment the browser keeps relative ("5m ago", "in 2h"). The text
+// rendered here is the fallback.
+templ ago(t time.Time) {
+	if t.IsZero() {
+		<span class="text-muted-foreground">—</span>
+	} else {
+		<time data-ago datetime={ rfc3339(t) } title={ stamp(t) }>{ stamp(t) }</time>
+	}
+}
+
+templ agoPtr(t *time.Time) {
+	if t == nil {
+		<span class="text-muted-foreground">—</span>
+	} else {
+		@ago(*t)
+	}
+}
+
+// clock is a moment as a time of day, formatted by the browser.
+templ clock(t time.Time) {
+	<time data-clock datetime={ rfc3339(t) } title={ stamp(t) }>{ t.Local().Format("15:04:05") }</time>
+}
+
+// when is a moment as date and time, formatted by the browser.
+templ when(t time.Time) {
+	if t.IsZero() {
+		<span>—</span>
+	} else {
+		<time data-when datetime={ rfc3339(t) } title={ stamp(t) }>{ stamp(t) }</time>
+	}
+}
+
+// dialog is a modal: a native <dialog> that nifi.js opens for any
+// [data-open="<id>"] button. Forms inside post through nifi.js.
+templ dialog(id, title, width string) {
+	<dialog id={ id } class="m-auto max-h-[90vh] max-w-[96vw] overflow-hidden rounded-sm border border-border-strong bg-card p-0 text-foreground shadow-lg backdrop:bg-[rgba(10,14,22,0.45)]" style={ "width: " + width }>
+		<div class="flex max-h-[90vh] flex-col">
+			<header class="flex items-center gap-2 border-b px-4 py-2.5">
+				<h2 class="text-[14px] font-semibold">{ title }</h2>
+				<span class="flex-1"></span>
+				<button type="button" data-close title="Close" class="inline-flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+					@icon.Icon("x")
+				</button>
+			</header>
+			{ children... }
+		</div>
+	</dialog>
+}
+
+// confirmDialog is the one confirmation every [data-confirm] action asks.
+templ confirmDialog() {
+	<dialog id="nf-confirm" class="m-auto w-[420px] max-w-[96vw] rounded-sm border border-border-strong bg-card p-0 text-foreground shadow-lg backdrop:bg-[rgba(10,14,22,0.45)]">
+		<header class="flex items-center gap-2 border-b px-4 py-2.5">
+			<h2 data-confirm-title class="text-[14px] font-semibold"></h2>
+		</header>
+		<p data-confirm-message class="px-4 py-3.5 text-[12.5px]"></p>
+		<footer class="flex items-center gap-2 border-t px-4 py-2.5">
+			<span class="flex-1"></span>
+			@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-confirm-no": ""}}) {
+				Cancel
+			}
+			@button.Button(button.Props{Attributes: templ.Attributes{"data-confirm-yes": ""}}) {
+				Confirm
+			}
+		</footer>
+	</dialog>
+}
+
+templ progressBar(v float64, tone string) {
+	<div class="h-1.5 overflow-hidden rounded-full bg-sunken">
+		<div class={ "h-full rounded-full", progressTone(tone) } style={ pctStyle(v) }></div>
+	</div>
+}
+
+func progressTone(t string) string {
+	switch t {
+	case "ok":
+		return "bg-ok"
+	case "err":
+		return "bg-err"
+	}
+	return "bg-primary"
+}

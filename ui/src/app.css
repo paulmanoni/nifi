@@ -129,14 +129,13 @@
   box-sizing: border-box;
 }
 
-html,
-body,
-#app {
+/* The islands live inside server-rendered pages: element rules apply
+   within them only, so the page around keeps its own styles. */
+.nifi-island {
   height: 100%;
-  margin: 0;
 }
 
-body {
+.nifi-island {
   font-family: var(--font);
   font-size: 12px;
   line-height: 1.4;
@@ -145,18 +144,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-a {
+.nifi-island a {
   color: var(--accent-text);
   text-decoration: none;
 }
-a:hover {
+.nifi-island a:hover {
   text-decoration: underline;
 }
 
-h1,
-h2,
-h3,
-h4 {
+.nifi-island :is(h1, h2, h3, h4) {
   margin: 0;
   font-weight: 600;
 }
@@ -167,7 +163,7 @@ code,
   font-size: 11px;
 }
 
-::selection {
+.nifi-island ::selection {
   background: var(--accent-soft);
 }
 

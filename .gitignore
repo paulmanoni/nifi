@@ -5,7 +5,8 @@ nifi.db*
 connections.json
 examples/**/*.db*
 
-# The UI is built into ui/dist, which go:embed puts in the binary — so dist is
-# committed and what builds it is not.
+# The UI's generated files (internal/web: *_templ.go, assets/nifi.css and
+# assets/islands, built from ui/) are committed, so a plain go build needs
+# neither templ, Tailwind nor Node — but what builds them is not.
 ui/node_modules/
 ui/.vite/

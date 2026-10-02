@@ -1,0 +1,186 @@
+/* The UI's stylesheet source, compiled into assets/nifi.css (embedded) by
+   `make ui`. Commit the output so a plain go build needs no Node or Tailwind.
+
+   Apache NiFi's canvas is a working instrument, not a document: chrome is
+   slate, surfaces are flat and bordered rather than floated, corners are
+   nearly square, and colour is reserved for state. The palette is kept under
+   --nf-* names (the canvas island's own stylesheet uses the plain ones) and
+   mapped onto templUI's token names, so the vendored components in ui/ read
+   it unchanged. */
+@import "tailwindcss";
+
+@source "./*.templ";
+@source "./*.go";
+@source "./ui/**/*.templ";
+@source "./ui/**/*.go";
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme inline {
+  --font-sans: "Helvetica Neue", Helvetica, Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+
+  --color-background: var(--nf-bg);
+  --color-foreground: var(--nf-text);
+  --color-card: var(--nf-bg-elev);
+  --color-card-foreground: var(--nf-text);
+  --color-popover: var(--nf-bg-elev);
+  --color-popover-foreground: var(--nf-text);
+  --color-primary: var(--nf-accent);
+  --color-primary-foreground: #fff;
+  --color-secondary: var(--nf-bg-sunken);
+  --color-secondary-foreground: var(--nf-text-2);
+  --color-muted: var(--nf-bg-hover);
+  --color-muted-foreground: var(--nf-text-3);
+  --color-accent: var(--nf-bg-hover);
+  --color-accent-foreground: var(--nf-text);
+  --color-destructive: var(--nf-err);
+  --color-border: var(--nf-border);
+  --color-border-strong: var(--nf-border-strong);
+  --color-input: var(--nf-border-strong);
+  --color-ring: var(--nf-accent);
+  --color-sunken: var(--nf-bg-sunken);
+
+  --color-accent-soft: var(--nf-accent-soft);
+  --color-accent-text: var(--nf-accent-text);
+  --color-chrome: var(--nf-chrome);
+  --color-chrome-2: var(--nf-chrome-2);
+  --color-chrome-text: var(--nf-chrome-text);
+  --color-chrome-text-2: var(--nf-chrome-text-2);
+
+  --color-ok: var(--nf-ok);
+  --color-ok-soft: var(--nf-ok-soft);
+  --color-warn: var(--nf-warn);
+  --color-warn-soft: var(--nf-warn-soft);
+  --color-err: var(--nf-err);
+  --color-err-soft: var(--nf-err-soft);
+  --color-running: var(--nf-running);
+}
+
+:root {
+  --nf-bg: #eceff1;
+  --nf-bg-elev: #ffffff;
+  --nf-bg-sunken: #e3e7ea;
+  --nf-bg-hover: #e8ecef;
+  --nf-border: #c9d1d6;
+  --nf-border-strong: #a8b3ba;
+  --nf-text: #262626;
+  --nf-text-2: #4d5d68;
+  --nf-text-3: #728e9b;
+
+  --nf-chrome: #303030;
+  --nf-chrome-2: #3c3c3c;
+  --nf-chrome-text: #e4e8ea;
+  --nf-chrome-text-2: #a6b3ba;
+  --nf-accent: #1491c1;
+  --nf-accent-soft: #dceef5;
+  --nf-accent-text: #106b8f;
+
+  --nf-ok: #3f9a4b;
+  --nf-ok-soft: #e2f0e2;
+  --nf-warn: #b08a26;
+  --nf-warn-soft: #faf2dd;
+  --nf-err: #ba554a;
+  --nf-err-soft: #f7e4e1;
+  --nf-running: #3f9a4b;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --nf-bg: #1b1f22;
+  --nf-bg-elev: #24292d;
+  --nf-bg-sunken: #16191c;
+  --nf-bg-hover: #2c3237;
+  --nf-border: #363d43;
+  --nf-border-strong: #4c555c;
+  --nf-text: #dde3e6;
+  --nf-text-2: #a6b3ba;
+  --nf-text-3: #7f939e;
+
+  --nf-chrome: #17191b;
+  --nf-chrome-2: #202325;
+  --nf-chrome-text: #dde3e6;
+  --nf-chrome-text-2: #93a3ac;
+  --nf-accent: #3fb0da;
+  --nf-accent-soft: #14323f;
+  --nf-accent-text: #6cc6e8;
+
+  --nf-ok: #5cb567;
+  --nf-ok-soft: #172a19;
+  --nf-warn: #d9b757;
+  --nf-warn-soft: #2c2614;
+  --nf-err: #d47b6e;
+  --nf-err-soft: #2e1c19;
+  --nf-running: #5cb567;
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: var(--nf-border-strong) transparent;
+  }
+  html,
+  body {
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+  body {
+    @apply bg-background font-sans text-foreground;
+  }
+  a {
+    color: var(--nf-accent-text);
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+  code {
+    @apply font-mono text-[11.5px];
+  }
+  ::selection {
+    background: var(--nf-accent-soft);
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer components {
+  .nf-toast {
+    @apply pointer-events-auto flex items-start gap-2 rounded-sm border bg-card px-3 py-2 text-[12.5px] shadow-lg;
+    border-left-width: 3px;
+  }
+  .nf-toast[data-kind="success"] {
+    border-left-color: var(--nf-ok);
+  }
+  .nf-toast[data-kind="error"] {
+    border-left-color: var(--nf-err);
+  }
+  .nf-toast[data-kind="warn"] {
+    border-left-color: var(--nf-warn);
+  }
+  .nf-toast[data-kind="info"] {
+    border-left-color: var(--nf-accent);
+  }
+  .nf-indeterminate {
+    animation: nf-slide 1.2s ease-in-out infinite;
+  }
+  @keyframes nf-slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(1250%);
+    }
+  }
+  [data-filtered-out] {
+    display: none !important;
+  }
+}

@@ -12,7 +12,8 @@
 **Documentation:** <https://paulmanoni.github.io/nifi/>
 
 **Embeddable, UI-first database migration flows for Go apps.** A NiFi-style
-canvas (Svelte + Svelte Flow) and a streaming engine you mount inside an
+console (server-rendered templ pages around a Svelte Flow canvas) and a
+streaming engine you mount inside an
 existing service to move large databases. It handles **MySQL → PostgreSQL**
 and **PostgreSQL → PostgreSQL**, with GUI transforms and Python-dialect scripts
 for the hard cases.
@@ -28,7 +29,8 @@ for the hard cases.
   dead-lettered instead of failing the table.
 - **Embedded.** One `http.Handler` serves the API, a live SSE run stream and the
   UI. Management state lives in SQLite. There is no Node at build or run time
-  for consumers, because `ui/dist` ships in the module.
+  for consumers: the UI's generated code, stylesheet and canvas bundle ship in
+  the module.
 
 ## Embed it
 
@@ -540,9 +542,9 @@ go run ./cmd/nifi -addr :8090 -config connections.json
 ## Development
 
 ```bash
-cd ui && npm install && npm run build      # rebuilds ui/dist (committed)
-NIFI_UI_DIR=ui/dist go run ./cmd/nifi      # serve the UI from disk: refresh after rebuilds
-go test ./...                              # unit + API tests
+cd ui && npm install && cd ..              # once: the canvas island's dependencies
+make ui                                    # templ code + Tailwind CSS + canvas bundle (all committed)
+go test ./...                              # unit, API and UI tests
 NIFI_TEST_PG=1 NIFI_TEST_MYSQL=127.0.0.1:3407 go test ./...   # + database integration
 ```
 

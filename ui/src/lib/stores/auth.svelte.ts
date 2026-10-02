@@ -78,7 +78,6 @@ class Auth {
     try {
       const m = await api.meta();
       this.meta = m;
-      if (m?.title) document.title = m.title;
       // Anonymous caller the host won't even let view: that's a sign-in problem, not a permission one.
       if (m?.auth !== 'builtin' && m?.authenticated === false && m.permissions && !m.permissions.view) this.signInRequired = true;
       this.loaded = true;

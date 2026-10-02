@@ -13,6 +13,8 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.1 // indirect
+	github.com/Oudwins/tailwind-merge-go v0.2.0 // indirect
+	github.com/a-h/templ v0.3.1020 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

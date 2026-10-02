@@ -14,13 +14,26 @@ databases with hundreds of tables and tables with 100M+ rows.
 github.com/paulmanoni/nifi            engine: New(Config) → *Engine, Engine.Handler()
 github.com/paulmanoni/nifi/nexusnifi  nexus adapter: nexusnifi.Module(cfg) nexus.Option
 github.com/paulmanoni/nifi/cmd/nifi   standalone binary (dev + ops use)
-ui/                                   Svelte 5 + Vite source; ui/dist is committed and go:embed'ed
+internal/web/                         the UI: templ pages + vendored templUI components
+ui/                                   Svelte 5 + Vite source of the canvas islands
 ```
 
-Consumers `go get` the module and never build the UI: `ui/dist` ships in the
-module. The whole surface (JSON API, SSE, SPA) is one `http.Handler`, mounted
-under any prefix; the SPA uses hash routing and relative asset URLs so it works
-at `/nifi`, `/admin/migrations`, or the root.
+Consumers `go get` the module and never build the UI: the generated templ
+code, the compiled stylesheet and the islands bundle (`internal/web/assets`)
+ship in the module, and `make ui` regenerates them. The whole surface (JSON
+API, SSE, UI) is one `http.Handler`, mounted under any prefix; pages build
+their links from the request's mount path, so it works at `/nifi`,
+`/admin/migrations`, or the root.
+
+**The UI is server-rendered.** Each page (flows, a run, connections,
+parameters, the migration wizard) is a templ component that reads through the
+JSON API in-process, as the requesting user — the same authorization, no
+second code path. Actions go back through the API from the browser. A page
+stays current by re-rendering its live regions when `/api/live` (or a run's
+event stream) reports a change; the refresh carries an ETag, so a page whose
+data didn't move costs a 304. Only what is a genuinely interactive diagram
+stays JavaScript: the flow designer and the dependency graph, built from
+`ui/` into one module the pages load on demand (an "island").
 
 Management state lives in a **SQLite** file (pure Go, modernc.org/sqlite):
 flows, runs, chunk plans and checkpoints, per-node stats snapshots, bulletins,

@@ -1,0 +1,29 @@
+package web
+
+import (
+	"errors"
+	"net/http"
+	"net/url"
+
+	"github.com/paulmanoni/nifi/internal/model"
+)
+
+// canvasRoute is a flow's designer: the canvas island fills the page.
+func canvasRoute(id string) func(*ctx) (page, int) {
+	return func(c *ctx) (page, int) {
+		var f model.Flow
+		if err := c.get("/flows/"+url.PathEscape(id), &f); err != nil {
+			status := http.StatusInternalServerError
+			var ae *APIError
+			if errors.As(err, &ae) {
+				status = ae.Status
+			}
+			return page{Nav: "flows", Title: "Flow not found", Body: emptyState("alert-triangle", "Could not open flow", err.Error(), c.href("/flows"), "Back to flows")}, status
+		}
+		return page{Nav: "flows", Title: f.Name, Full: true, Live: "instance", Body: canvasPage(f)}, http.StatusOK
+	}
+}
+
+templ canvasPage(f model.Flow) {
+	<div id="nf-canvas" class="absolute inset-0" data-island="canvas" data-props={ jsonAttr(map[string]string{"id": f.ID}) }></div>
+}

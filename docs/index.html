@@ -79,7 +79,7 @@
     <tr><td>An engine</td><td>Parallel key-range chunks, bounded queues with back-pressure, PostgreSQL <code>COPY</code> through a staging table.</td></tr>
     <tr><td>Exact restarts</td><td>A chunk is checkpointed only once every batch from it is written, so a stopped run resumes on the first row it did not finish.</td></tr>
     <tr><td>Somewhere for bad rows</td><td>A row the destination refuses is found, set aside with its reason, and can be replayed once the flow is fixed.</td></tr>
-    <tr><td>One binary</td><td><code>ui/dist</code> ships in the module: no Node at build or run time for anything that depends on this.</td></tr>
+    <tr><td>One binary</td><td>The UI — server-rendered templ pages and the canvas bundle — ships in the module: no Node at build or run time for anything that depends on this.</td></tr>
   </table>
 </section>
 

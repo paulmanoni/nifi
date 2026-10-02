@@ -1,0 +1,479 @@
+package web
+
+import (
+	"net/url"
+	"strconv"
+
+	"github.com/paulmanoni/nifi/internal/model"
+	"github.com/paulmanoni/nifi/internal/web/ui/button"
+	"github.com/paulmanoni/nifi/internal/web/ui/icon"
+)
+
+templ runPage(c *ctx, v runView) {
+	{{ d := v.D }}
+	<div class="px-6 pt-5 pb-12">
+		<div class="mb-3.5 flex flex-wrap items-center gap-2.5">
+			if v.Flow != nil {
+				@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Href: c.href("/flows/" + url.PathEscape(v.Flow.ID)), Attributes: templ.Attributes{"title": "Open the flow"}}) {
+					@icon.Icon("arrow-left", "size-4")
+				}
+			} else {
+				@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Href: c.href("/flows"), Attributes: templ.Attributes{"title": "All flows"}}) {
+					@icon.Icon("arrow-left", "size-4")
+				}
+			}
+			<div class="min-w-0">
+				<h1 class="text-[16px] font-semibold">Run <span class="font-mono text-[12px] font-normal text-muted-foreground">{ v.ID }</span></h1>
+				<div class="text-[12px] text-muted-foreground">
+					if v.Flow != nil {
+						<a href={ templ.SafeURL(c.href("/flows/" + url.PathEscape(v.Flow.ID))) } class="inline-flex items-center gap-1">
+							@icon.Icon("workflow", "size-3")
+							{ v.Flow.Name }
+						</a>
+						·
+					}
+					{ "started " }
+					@when(d.StartedAt)
+					if d.FinishedAt != nil {
+						{ " · finished " }
+						@when(*d.FinishedAt)
+					}
+				</div>
+			</div>
+			@statusPill(&d.RunSummary, false)
+			<span class="flex-1"></span>
+			if c.can("run") {
+				@runControls(c, &d.RunSummary)
+			}
+		</div>
+		<div class="rounded-sm border bg-card">
+			<nav class="flex items-stretch gap-0.5 border-b px-2" role="tablist">
+				@tab(v.href(c, "tab", "progress"), "Progress", v.Tab == "progress", "", "")
+				@tab(v.href(c, "tab", "bulletins"), "Bulletins", v.Tab == "bulletins", countLabel(len(v.Bulletins)), "")
+				if c.can("data") {
+					@tab(v.href(c, "tab", "dead"), "Dead letters", v.Tab == "dead", countLabel64(d.RowsFailed), "err")
+				}
+				@tab(v.href(c, "tab", "history"), "Run history", v.Tab == "history", "", "")
+			</nav>
+			switch v.Tab {
+				case "bulletins":
+					@bulletinsTab(c, v)
+				case "dead":
+					@deadTab(c, v)
+				case "history":
+					@historyTab(c, v)
+				default:
+					@progressTab(c, v)
+			}
+		</div>
+	</div>
+}
+
+func countLabel(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
+}
+
+func countLabel64(n int64) string {
+	if n == 0 {
+		return ""
+	}
+	return fmtCompact(n)
+}
+
+templ tab(href, label string, on bool, n, tone string) {
+	<a
+		href={ templ.SafeURL(href) }
+		role="tab"
+		aria-selected={ boolAttr(on) }
+		class={ "-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-[12.5px] font-medium no-underline hover:no-underline",
+			templ.KV("border-primary text-foreground", on),
+			templ.KV("border-transparent text-secondary-foreground hover:text-foreground", !on) }
+	>
+		{ label }
+		if n != "" {
+			<span class={ "rounded-full px-1.5 text-[10.5px] leading-4 font-semibold", templ.KV("bg-err-soft text-err", tone == "err"), templ.KV("bg-muted text-muted-foreground", tone != "err") }>{ n }</span>
+		}
+	</a>
+}
+
+// runControls pauses, resumes or stops a run.
+templ runControls(c *ctx, r *model.RunSummary) {
+	<div class="flex items-center gap-1.5">
+		if r.Status == model.RunRunning {
+			@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-post": c.api("/runs/" + url.PathEscape(r.ID) + "/pause")}}) {
+				@icon.Icon("pause")
+				Pause
+			}
+		}
+		if r.Status == model.RunPaused {
+			@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{"data-post": c.api("/runs/" + url.PathEscape(r.ID) + "/resume")}}) {
+				@icon.Icon("play")
+				Resume
+			}
+		}
+		if r.Status == model.RunRunning || r.Status == model.RunPending || r.Status == model.RunPaused {
+			@button.Button(button.Props{Variant: button.VariantDestructive, Attributes: templ.Attributes{
+				"data-post": c.api("/runs/" + url.PathEscape(r.ID) + "/stop"), "data-confirm-title": "Stop run",
+				"data-confirm":       "Stop this run? In-flight chunks are abandoned; committed chunks are kept and the run can be resumed later.",
+				"data-confirm-label": "Stop run", "data-danger": "",
+			}}) {
+				@icon.Icon("square", "size-3")
+				Stop
+			}
+		}
+	</div>
+}
+
+templ progressTab(c *ctx, v runView) {
+	{{ d := v.D }}
+	{{ t := v.totals() }}
+	<div class="flex flex-col gap-4 p-4">
+		<div class="flex flex-wrap gap-x-8 gap-y-3">
+			@stat("Rows read", fmtCompact(d.RowsRead), fmtNum(d.RowsRead), "")
+			if d.Live {
+				@stat("Rows written", fmtCompact(d.RowsWritten), fmtNum(d.RowsWritten), "")
+				@stat("Rows deleted", fmtCompact(t.Deleted), fmtNum(t.Deleted), "")
+			} else {
+				@stat("Rows written", fmtCompact(d.RowsWritten)+" / ~"+fmtCompact(t.Est), fmtNum(d.RowsWritten), "")
+			}
+			@stat("Failed", fmtCompact(d.RowsFailed), fmtNum(d.RowsFailed), onClass(d.RowsFailed > 0, "text-err"))
+			if d.Live {
+				@stat("Tables", itoa(t.All), "", "")
+			} else {
+				@stat("Tables", itoa(t.Done)+" / "+itoa(t.All), "", "")
+				@stat("Chunks", fmtCompact(t.ChunksDone)+" / "+fmtCompact(t.ChunksTotal), "", "")
+			}
+			@stat("Throughput", fmtCompact(int64(t.PerSec))+" rows/s", "", "")
+			if d.Live {
+				@stat("Following for", fmtDuration(d.StartedAt, d.FinishedAt), "", "")
+			} else {
+				@stat("Elapsed", fmtDuration(d.StartedAt, d.FinishedAt), "", "")
+			}
+		</div>
+		if d.Live {
+			<p class="max-w-[80ch] rounded-sm border border-primary/30 bg-accent-soft px-3 py-2 text-[12.5px]">This run follows its source and keeps going: new and changed rows are written as they appear, and rows deleted at the source are removed. It ends when you stop it, and starts again where it left off.</p>
+		} else {
+			@progressBar(v.overall(), runTone(d.Status))
+			@phaseStepper(v)
+		}
+		if d.Error != "" {
+			<pre class="rounded-sm border border-err/30 bg-err-soft p-3 text-[12px] whitespace-pre-wrap text-err">{ d.Error }</pre>
+		}
+		<div class="flex flex-wrap items-center gap-2">
+			<label class="relative flex w-[220px] items-center">
+				<span class="pointer-events-none absolute left-2 text-muted-foreground">
+					@icon.Icon("search", "size-3.5")
+				</span>
+				<input type="search" data-query value={ v.Q } placeholder="Filter tables…" class={ inputClass, "pl-7" }/>
+			</label>
+			<div class="flex rounded-sm border border-border-strong bg-card p-px">
+				for _, s := range []string{"all", "reading", "pending", "done", "failed"} {
+					@seg(v.href(c, "status", statusParam(s)), "", capitalize(s)+" "+itoa(v.statusCount(s)), v.Status == s || (v.Status == "" && s == "all"), "")
+				}
+			</div>
+		</div>
+		<div class="overflow-x-auto rounded-sm border">
+			if rows := v.tables(); len(rows) > 0 {
+				for _, tb := range rows {
+					<div class="grid min-w-[640px] grid-cols-[18px_minmax(120px,260px)_1fr_150px_70px_90px] items-center gap-3 border-b px-3 py-1.5 text-[12.5px] last:border-0">
+						@tableIcon(tb.Status)
+						<span class="truncate font-mono text-[12px]" title={ tb.Table }>{ tb.Table }</span>
+						if !d.Live {
+							if tb.Status == "done" {
+								@progressBar(100, "ok")
+							} else {
+								@progressBar(pct(tb.RowsWritten, tb.EstimatedRows), tableTone(tb.Status))
+							}
+						} else {
+							<span></span>
+						}
+						<span class="text-right tabular-nums" title={ fmtNum(tb.RowsWritten) + " written / " + fmtNum(tb.RowsRead) + " read / ~" + fmtNum(tb.EstimatedRows) + " estimated" }>
+							{ fmtCompact(tb.RowsWritten) }
+							if !d.Live {
+								<span class="text-muted-foreground">/ ~{ fmtCompact(tb.EstimatedRows) }</span>
+							}
+						</span>
+						<span class="text-right text-[11.5px] text-muted-foreground tabular-nums">
+							if d.Live {
+								if tb.RowsDeleted > 0 {
+									{ fmtCompact(tb.RowsDeleted) } deleted
+								}
+							} else {
+								{ i64(tb.ChunksDone) }/{ i64(tb.ChunksTotal) } ch
+							}
+						</span>
+						<span class="text-right text-[11.5px] text-err tabular-nums">
+							if tb.RowsFailed > 0 {
+								{ fmtCompact(tb.RowsFailed) } failed
+							}
+						</span>
+					</div>
+				}
+			} else {
+				<p class="px-3 py-6 text-center text-muted-foreground">
+					if len(d.Tables) == 0 {
+						No table progress yet.
+					} else {
+						No tables match.
+					}
+				</p>
+			}
+		</div>
+	</div>
+}
+
+func statusParam(s string) string {
+	if s == "all" {
+		return ""
+	}
+	return s
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return string(s[0]-32) + s[1:]
+}
+
+func runTone(s model.RunStatus) string {
+	switch s {
+	case model.RunCompleted:
+		return "ok"
+	case model.RunFailed:
+		return "err"
+	}
+	return ""
+}
+
+func tableTone(s string) string {
+	if s == "failed" {
+		return "err"
+	}
+	return ""
+}
+
+templ stat(label, value, title, class string) {
+	<div title={ title }>
+		<div class="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">{ label }</div>
+		<div class={ "text-[16px] font-semibold tabular-nums", class }>{ value }</div>
+	</div>
+}
+
+templ tableIcon(status string) {
+	switch status {
+		case "done":
+			@icon.Icon("check", "size-3.5 text-ok")
+		case "failed":
+			@icon.Icon("x", "size-3.5 text-err")
+		case "reading":
+			@icon.Icon("loader", "size-3.5 animate-spin text-primary")
+		default:
+			@icon.Icon("clock", "size-3.5 text-muted-foreground")
+	}
+}
+
+templ phaseStepper(v runView) {
+	{{ cur := v.phaseIndex() }}
+	<div class="flex flex-wrap items-center gap-2 text-[12px]">
+		for i, ph := range phases {
+			if i > 0 {
+				<span class={ "h-px w-7", templ.KV("bg-ok", i <= cur), templ.KV("bg-border-strong", i > cur) }></span>
+			}
+			<span class="inline-flex items-center gap-1.5">
+				if i < cur {
+					<span class="inline-flex size-[18px] items-center justify-center rounded-full bg-ok text-white">
+						@icon.Icon("check", "size-3")
+					</span>
+				} else if i == cur && v.D.Status == model.RunFailed {
+					<span class="inline-flex size-[18px] items-center justify-center rounded-full bg-err text-[10.5px] font-semibold text-white">{ itoa(i + 1) }</span>
+				} else if i == cur {
+					<span class="inline-flex size-[18px] animate-pulse items-center justify-center rounded-full bg-primary text-[10.5px] font-semibold text-white">{ itoa(i + 1) }</span>
+				} else {
+					<span class="inline-flex size-[18px] items-center justify-center rounded-full border border-border-strong text-[10.5px] text-muted-foreground">{ itoa(i + 1) }</span>
+				}
+				<span class={ templ.KV("font-semibold", i == cur), templ.KV("text-muted-foreground", i > cur) }>{ ph.Label }</span>
+			</span>
+		}
+	</div>
+}
+
+templ bulletinsTab(c *ctx, v runView) {
+	{{ rows := v.bulletins() }}
+	<div class="flex flex-col">
+		<div class="flex flex-wrap items-center gap-2 border-b p-3">
+			<label class="relative flex w-[240px] items-center">
+				<span class="pointer-events-none absolute left-2 text-muted-foreground">
+					@icon.Icon("search", "size-3.5")
+				</span>
+				<input type="search" data-query value={ v.Q } placeholder="Filter messages…" class={ inputClass, "pl-7" }/>
+			</label>
+			<div class="flex rounded-sm border border-border-strong bg-card p-px">
+				@seg(v.href(c, "level", ""), "", "All "+itoa(v.levelCount("")), v.Level == "", "")
+				@seg(v.href(c, "level", "warn"), "", "Warnings+ "+itoa(v.levelCount("warn")), v.Level == "warn", "")
+				@seg(v.href(c, "level", "error"), "", "Errors "+itoa(v.levelCount("error")), v.Level == "error", "")
+			</div>
+		</div>
+		<div class="h-[calc(100vh-300px)] min-h-[300px] overflow-y-auto font-mono text-[11.5px]" data-follow>
+			for _, b := range rows {
+				<div class={ "grid grid-cols-[70px_52px_auto_auto_1fr] items-baseline gap-2.5 border-b border-l-2 px-3 py-1", bulletinTone(b.Level) }>
+					<span class="text-muted-foreground">
+						@clock(b.Time)
+					</span>
+					<span class={ "font-semibold uppercase", levelText(b.Level) }>{ b.Level }</span>
+					<span>
+						if b.NodeID != "" {
+							<span class="rounded-sm border bg-card px-1 font-sans text-[11px]">{ v.nodeName(b.NodeID) }</span>
+						}
+					</span>
+					<span class="text-muted-foreground">{ b.Table }</span>
+					<span class="whitespace-pre-wrap">{ b.Message }</span>
+				</div>
+			}
+			if len(rows) == 0 {
+				<p class="px-3 py-6 text-center font-sans text-muted-foreground">
+					if len(v.Bulletins) == 0 {
+						No bulletins yet.
+					} else {
+						No bulletins match.
+					}
+				</p>
+			}
+		</div>
+	</div>
+}
+
+func bulletinTone(level string) string {
+	switch level {
+	case "error":
+		return "border-l-err bg-err-soft/50"
+	case "warn":
+		return "border-l-warn bg-warn-soft/50"
+	}
+	return "border-l-transparent"
+}
+
+func levelText(level string) string {
+	switch level {
+	case "error":
+		return "text-err"
+	case "warn":
+		return "text-warn"
+	}
+	return "text-muted-foreground"
+}
+
+templ deadTab(c *ctx, v runView) {
+	<div class="flex flex-col">
+		<div class="flex flex-wrap items-center gap-2 border-b p-3">
+			<select data-param="table" aria-label="Table" class={ selectClass }>
+				<option value="">All tables</option>
+				for _, t := range v.D.Tables {
+					<option value={ t.Table } selected?={ v.Table == t.Table }>{ t.Table }</option>
+				}
+			</select>
+			@button.Button(button.Props{Variant: button.VariantGhost, Size: button.SizeIcon, Href: v.href(c), Attributes: templ.Attributes{"title": "Refresh"}}) {
+				@icon.Icon("refresh")
+			}
+			if c.can("run") {
+				for _, n := range v.deadNodes() {
+					@button.Button(button.Props{Variant: button.VariantOutline, Attributes: templ.Attributes{
+						"title":     "Run these rows through the flow again, from this node on",
+						"data-post": c.api("/runs/" + url.PathEscape(v.ID) + "/deadletters/replay"), "data-body": jsonAttr(map[string]string{"nodeId": n}),
+						"data-confirm-title": "Replay dead letters",
+						"data-confirm":       "Feed every dead-lettered row of “" + v.nodeName(n) + "” back into it and on through the rest of the flow? This starts a run of its own and writes to the same targets.",
+						"data-confirm-label": "Replay", "data-success": "Replay started", "data-then": c.href("/runs/{id}"),
+					}}) {
+						@icon.Icon("rotate-ccw")
+						Replay { v.nodeName(n) }
+					}
+				}
+			}
+			<span class="flex-1"></span>
+			<span class="text-[12px] text-muted-foreground">{ v.deadRange() }</span>
+			@button.Button(button.Props{Variant: button.VariantOutline, Size: button.SizeSm, Href: v.href(c, "offset", itoa(max(0, v.Offset-deadPageSize))), Disabled: v.Offset == 0}) {
+				Prev
+			}
+			@button.Button(button.Props{Variant: button.VariantOutline, Size: button.SizeSm, Href: v.href(c, "offset", itoa(v.Offset+deadPageSize)), Disabled: int64(v.Offset+deadPageSize) >= v.Dead.Total}) {
+				Next
+			}
+		</div>
+		<div class="h-[calc(100vh-300px)] min-h-[300px] overflow-y-auto">
+			if v.Dead.Err != nil {
+				<p class="px-3 py-6 text-center text-err">{ v.Dead.Err.Error() }</p>
+			}
+			for _, dl := range v.Dead.Items {
+				<details class="border-b">
+					<summary class="flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-[12px] hover:bg-muted">
+						@icon.Icon("chevron-right", "size-3 shrink-0 text-muted-foreground")
+						<span class="text-muted-foreground">
+							@clock(dl.Time)
+						</span>
+						<span class="font-mono">{ dl.Table }</span>
+						<span class="text-muted-foreground">{ v.nodeName(dl.NodeID) }</span>
+						<span class="truncate text-err">{ dl.Error }</span>
+					</summary>
+					<div class="flex flex-col gap-2 px-8 pb-3">
+						<p class="text-[12px] whitespace-pre-wrap text-err">{ dl.Error }</p>
+						<pre class="max-h-[260px] overflow-auto rounded-sm bg-sunken p-2 font-mono text-[11.5px]">{ prettyJSON(dl.Row) }</pre>
+					</div>
+				</details>
+			}
+			if v.Dead.Err == nil && len(v.Dead.Items) == 0 {
+				<p class="px-3 py-6 text-center text-muted-foreground">
+					{ deadEmpty(v.Table) }
+				</p>
+			}
+		</div>
+	</div>
+}
+
+templ historyTab(c *ctx, v runView) {
+	<div class="overflow-x-auto">
+		if v.HistErr != nil {
+			<p class="px-3 py-6 text-center text-muted-foreground">{ v.HistErr.Error() }</p>
+		} else if len(v.History) == 0 {
+			<p class="px-3 py-6 text-center text-muted-foreground">This flow has never run.</p>
+		} else {
+			<table class="w-full text-[12.5px]">
+				<thead>
+					<tr class="border-b bg-muted/60 text-left text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+						<th class="px-3 py-2">Started</th>
+						<th class="px-3 py-2">Status</th>
+						<th class="px-3 py-2">Duration</th>
+						<th class="px-3 py-2 text-right">Read</th>
+						<th class="px-3 py-2 text-right">Written</th>
+						<th class="px-3 py-2 text-right">Failed</th>
+						<th class="px-3 py-2"></th>
+					</tr>
+				</thead>
+				<tbody>
+					for i := range v.History {
+						{{ r := &v.History[i] }}
+						<tr class={ "border-b last:border-0", templ.KV("bg-accent-soft", r.ID == v.ID) }>
+							<td class="px-3 py-1.5 whitespace-nowrap">
+								@when(r.StartedAt)
+							</td>
+							<td class="px-3 py-1.5">
+								@statusPill(r, true)
+							</td>
+							<td class="px-3 py-1.5 tabular-nums">{ fmtDuration(r.StartedAt, r.FinishedAt) }</td>
+							<td class="px-3 py-1.5 text-right tabular-nums">{ fmtCompact(r.RowsRead) }</td>
+							<td class="px-3 py-1.5 text-right tabular-nums">{ fmtCompact(r.RowsWritten) }</td>
+							<td class={ "px-3 py-1.5 text-right tabular-nums", templ.KV("text-err", r.RowsFailed > 0) }>{ fmtCompact(r.RowsFailed) }</td>
+							<td class="px-3 py-1.5">
+								if r.ID != v.ID {
+									<a href={ templ.SafeURL(c.href("/runs/" + url.PathEscape(r.ID))) }>Open</a>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}
+

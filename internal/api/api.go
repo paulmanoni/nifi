@@ -1,4 +1,5 @@
-// Package api serves nifi's JSON API, the SSE run stream and the embedded UI.
+// Package api serves nifi's JSON API, the SSE run stream and the UI (package
+// web, which reads through this API).
 package api
 
 import (
@@ -7,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"path"
 	"regexp"
@@ -23,6 +23,7 @@ import (
 	"github.com/paulmanoni/nifi/internal/model"
 	"github.com/paulmanoni/nifi/internal/script"
 	"github.com/paulmanoni/nifi/internal/store"
+	"github.com/paulmanoni/nifi/internal/web"
 	"github.com/paulmanoni/nifi/record"
 )
 
@@ -32,11 +33,9 @@ type Server struct {
 	Runs      *flow.Manager
 	Conns     []dbx.Connection // declared by the host application
 	Resolve   flow.ConnectionResolver
-	UI        fs.FS
 	Base      string
 	Title     string
 	Version   string
-	DevUI     bool
 	Authorize func(r *http.Request, a Action) error
 	Actor     func(r *http.Request) string
 	Sessions  *Sessions
@@ -44,7 +43,6 @@ type Server struct {
 	// Fixed are parameters the application declares (Config.Parameters);
 	// they cannot be edited from the UI.
 	Fixed []model.Parameter
-	index sync.Map // base → injected index.html
 
 	live     *liveHub
 	liveOnce sync.Once
@@ -147,7 +145,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, httpError{http.StatusNotFound, "no such endpoint"})
 	})
-	mux.HandleFunc("/", s.guard(ActionView, s.serveUI))
+	// Everything else is the UI: templ pages that read through this mux.
+	mux.Handle("/", &web.Handler{B: webBackend{s: s, api: mux}, Version: s.Version})
 	return mux
 }
 
@@ -1064,46 +1063,6 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-}
-
-// ---- UI ----
-
-func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
-	p := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-	if p != "" && p != "index.html" {
-		if f, err := s.UI.Open(p); err == nil {
-			st, _ := f.Stat()
-			f.Close()
-			if st != nil && !st.IsDir() {
-				if strings.HasPrefix(p, "assets/") {
-					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-				}
-				http.ServeFileFS(w, r, s.UI, p)
-				return
-			}
-		}
-	}
-	base := s.baseFor(r)
-	html, ok := s.index.Load(base)
-	if !ok || s.DevUI {
-		raw, err := fs.ReadFile(s.UI, "index.html")
-		if err != nil {
-			raw = []byte("<!doctype html><p>UI bundle missing</p>")
-		}
-		cfg, _ := json.Marshal(map[string]string{"base": base, "title": s.Title})
-		inject := "<script>window.__NIFI__=" + string(cfg) + "</script>"
-		page := string(raw)
-		if i := strings.Index(page, "</head>"); i >= 0 {
-			page = page[:i] + inject + page[i:]
-		} else {
-			page = inject + page
-		}
-		html = []byte(page)
-		s.index.Store(base, html)
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Write(html.([]byte))
 }
 
 // ---- schedules & parameters ----
