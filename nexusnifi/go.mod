@@ -3,8 +3,8 @@ module github.com/paulmanoni/nifi/nexusnifi
 go 1.26.2
 
 require (
-	github.com/paulmanoni/nexus v1.59.1
-	github.com/paulmanoni/nifi v0.1.0
+	github.com/paulmanoni/nexus/v2 v2.11.0
+	github.com/paulmanoni/nifi v0.6.0
 )
 
 require (
@@ -32,8 +32,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	go.starlark.net v0.0.0-20260908191801-89a6a09411d5 // indirect
-	go.uber.org/multierr v1.10.0 // indirect
-	go.uber.org/zap v1.28.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

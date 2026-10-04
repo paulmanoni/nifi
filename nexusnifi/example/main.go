@@ -4,14 +4,15 @@ package main
 import (
 	"os"
 
-	"github.com/paulmanoni/nexus"
+	"github.com/paulmanoni/nexus/v2"
+	"github.com/paulmanoni/nexus/v2/config"
 
 	"github.com/paulmanoni/nifi"
 	"github.com/paulmanoni/nifi/nexusnifi"
 )
 
 func main() {
-	nexus.Run(nexus.Config{Server: nexus.ServerConfig{Addr: ":8091"}},
+	nexus.Run(config.Runtime{Server: config.Server{Addr: ":8091"}},
 		nexus.Module("admin", append([]nexus.Option{nexus.Path("/admin")},
 			nexusnifi.Routes(nexusnifi.Config{
 				Path: "/flows",

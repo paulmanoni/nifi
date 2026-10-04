@@ -24,9 +24,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulmanoni/nexus"
-	"github.com/paulmanoni/nexus/extension/auth"
-	"github.com/paulmanoni/nexus/httpx"
+	"github.com/paulmanoni/nexus/v2"
+	"github.com/paulmanoni/nexus/v2/config"
+	"github.com/paulmanoni/nexus/v2/extension/auth"
+	"github.com/paulmanoni/nexus/v2/httpx"
 
 	"github.com/paulmanoni/nifi"
 )
@@ -106,7 +107,7 @@ func Routes(cfg Config) []nexus.Option {
 			}
 			if ec.Actor == nil {
 				ec.Actor = func(r *http.Request) string {
-					if id, ok := auth.IdentityFrom(r.Context()); ok {
+					if id := auth.Current(r.Context()); id != nil {
 						return id.ID
 					}
 					return ""
@@ -123,9 +124,9 @@ func Routes(cfg Config) []nexus.Option {
 	with := func(extra ...nexus.RestOption) []nexus.RestOption {
 		return append(append([]nexus.RestOption{}, cfg.Options...), extra...)
 	}
-	opts = append(opts, nexus.AsRestHandler("GET", path, redirect, with(nexus.Describe("Data flows UI"))...))
+	opts = append(opts, nexus.AsRest("GET", path, redirect, with(nexus.Describe("Data flows UI"))...))
 	for _, m := range []string{"GET", "POST", "PUT", "DELETE"} {
-		opts = append(opts, nexus.AsRestHandler(m, path+"/*rest", serve,
+		opts = append(opts, nexus.AsRest(m, path+"/*rest", serve,
 			with(nexus.Describe("Data flows — UI, API and live run stream"), nexus.WithIcon("workflow"))...))
 	}
 	return opts
@@ -137,7 +138,7 @@ func Connection(name string) (nifi.Connection, error) { return fromSpec(name) }
 
 // fromSpec builds a connection from a nexus.toml [databases.<name>] block.
 func fromSpec(name string) (nifi.Connection, error) {
-	spec, ok := nexus.DatabaseSpecFor(name)
+	spec, ok := config.DatabaseSpecFor(name)
 	if !ok {
 		return nifi.Connection{}, fmt.Errorf("nexusnifi: no [databases.%s] block in nexus.toml", name)
 	}
@@ -146,7 +147,7 @@ func fromSpec(name string) (nifi.Connection, error) {
 			return inline
 		}
 		if spec.KeyPrefix != "" {
-			return nexus.Get[string](spec.KeyPrefix + suffix)
+			return config.Get[string](spec.KeyPrefix + suffix)
 		}
 		return ""
 	}
@@ -166,7 +167,7 @@ func fromSpec(name string) (nifi.Connection, error) {
 
 func authorizer(perms map[nifi.Action]string) nifi.Authorizer {
 	return func(r *http.Request, a nifi.Action) error {
-		if _, ok := auth.IdentityFrom(r.Context()); !ok {
+		if auth.Current(r.Context()) == nil {
 			return nifi.ErrUnauthenticated
 		}
 		if p := perms[a]; p != "" && !auth.Can(r.Context(), p) {
